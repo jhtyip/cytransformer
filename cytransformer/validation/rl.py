@@ -18,23 +18,22 @@ import torch
 
 import sys
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import numpy as np
 
 import time
 
 import torch.multiprocessing as mp
 
-from monitoring import monitor_perf, parallel_monitor_perf
-from generate_triangs_from_checkpoint import generate_triangs_from_checkpoint
+from cytransformer.validation.monitoring import monitor_perf, parallel_monitor_perf
+from cytransformer.validation.generate_triangs_from_checkpoint import generate_triangs_from_checkpoint
 import json
 import random
 import itertools
-from data_generation import split_data
-from utilities import tokens_triang_to_vert_indices_woo_triang, file_barrier
+from cytransformer.data_generation import split_data
+from cytransformer.utilities import tokens_triang_to_vert_indices_woo_triang, file_barrier
 
-from Args import ModelParams, EncodingParams, TrainingParams, JobParams, RLParams, parse_arguments
-from train import train
+from cytransformer.args import ModelParams, EncodingParams, TrainingParams, JobParams, RLParams, parse_arguments
+from cytransformer.train import train
 
 
 def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: ModelParams, encoding_params: EncodingParams, training_params: TrainingParams, job_params: JobParams, RL_params: RLParams):

@@ -13,16 +13,15 @@ import os
 # Generation over many polytopes can be slow; raise the NCCL collective timeout
 # so the cross-rank barriers do not abort on long-running ranks.
 os.environ["NCCL_TIMEOUT"] = "36000"
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import numpy as np
 import time
-from utilities import cleanup, get_np_input_polytopes_and_masks_from_file
-from monitoring import parallel_monitor_perf, monitor_perf, evaluate_generation_results_saved_outputs_format, evaluate_generation_results_saved_outputs_to_share_format
-from inference import generate_triangulations
+from cytransformer.utilities import cleanup, get_np_input_polytopes_and_masks_from_file
+from cytransformer.validation.monitoring import parallel_monitor_perf, monitor_perf, evaluate_generation_results_saved_outputs_format, evaluate_generation_results_saved_outputs_to_share_format
+from cytransformer.inference import generate_triangulations
 import random
 from torch.utils.data import DistributedSampler, DataLoader
-from Polys_triangs_dataset import Polys_triangs_dataset
-from Args import return_transformer, model_params_from_checkpoint, encoding_params_from_checkpoint
+from cytransformer.dataset import Polys_triangs_dataset
+from cytransformer.args import return_transformer, model_params_from_checkpoint, encoding_params_from_checkpoint
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn

@@ -12,17 +12,16 @@ it always matches how the model was trained.
 import argparse
 import os
 
-import cyt  # noqa: F401  (side effect: puts repo root on sys.path)
 import torch
 
-from config import load_infer_config
-from Args import (
+from cytransformer.config import load_infer_config
+from cytransformer.args import (
     model_params_from_checkpoint,
     encoding_params_from_checkpoint,
     return_transformer,
 )
-from utilities import get_np_input_polytopes_and_masks_from_file, save_output
-from inference import generate_triangulations
+from cytransformer.utilities import get_np_input_polytopes_and_masks_from_file, save_output
+from cytransformer.inference import generate_triangulations
 
 
 def main():

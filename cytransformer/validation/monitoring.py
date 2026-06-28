@@ -16,9 +16,9 @@ Layering:
     the per-rank/per-epoch output files into the scorer and persist results.
 """
 
-from check_valid import compute_volume, check_valid_triangulation
-from check_FRST import FRST_check
-from utilities import tokens_triang_to_vert_indices_woo_triang, vert_indices_triang_to_vert_coord_triang, vert_coord_woo_triang_to_vert_coord_wo_triang, save_output
+from cytransformer.validation.check_valid import compute_volume, check_valid_triangulation
+from cytransformer.validation.check_frst import FRST_check
+from cytransformer.utilities import tokens_triang_to_vert_indices_woo_triang, vert_indices_triang_to_vert_coord_triang, vert_coord_woo_triang_to_vert_coord_wo_triang, save_output
 import numpy as np
 import time
 from typing import Tuple

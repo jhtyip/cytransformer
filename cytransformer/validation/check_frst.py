@@ -11,9 +11,8 @@ identical triangulations before the (expensive) CYTools check.
 
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import numpy as np
-from utilities import tokens_triang_to_vert_indices_wo_triang
+from cytransformer.utilities import tokens_triang_to_vert_indices_wo_triang
 import time
 
 def is_triangulation_FRST(poly, poly_mask, tokens_triang, padding_indx):

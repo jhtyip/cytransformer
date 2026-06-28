@@ -44,7 +44,7 @@ if "cytools" not in sys.modules:
     sys.modules["cytools"] = _stub
 
 import torch  # noqa: E402
-from Args import (  # noqa: E402
+from cytransformer.args import (  # noqa: E402
     ModelParams,
     encoding_parameters,
     return_transformer,

@@ -13,13 +13,12 @@ as an independent cross-validation of it.
 
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import numpy as np
 from fractions import Fraction
 from collections import Counter
 from scipy.spatial import ConvexHull
-from utilities import vert_indices_triang_to_vert_coord_triang, vert_coord_woo_triang_to_vert_coord_wo_triang
+from cytransformer.utilities import vert_indices_triang_to_vert_coord_triang, vert_coord_woo_triang_to_vert_coord_wo_triang
 
 
 

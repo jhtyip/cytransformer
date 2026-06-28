@@ -9,11 +9,10 @@ existing DistributedDataParallel path). No SLURM / cluster glue involved.
 """
 import argparse
 
-import cyt  # noqa: F401  (side effect: puts repo root on sys.path)
 import torch
 
-from config import load_train_config
-from train import train
+from cytransformer.config import load_train_config
+from cytransformer.train import train
 
 
 def main():

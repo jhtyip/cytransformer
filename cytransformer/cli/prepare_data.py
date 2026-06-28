@@ -12,10 +12,9 @@ we do not generate new triangulations here).
 import argparse
 import os
 
-import cyt  # noqa: F401  (side effect: puts repo root on sys.path)
 import yaml
 
-from data_generation import split_data_into_three_files
+from cytransformer.data_generation import split_data_into_three_files
 
 
 def main():

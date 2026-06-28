@@ -22,7 +22,6 @@ import torch
 # torch.set_num_interop_threads(10)
 import sys
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import numpy as np
 
 import time
@@ -32,14 +31,14 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from inference import generate_triangulations
+from cytransformer.inference import generate_triangulations
 import random
 from itertools import product
-from utilities import cleanup, save_output, get_np_input_polytopes_and_masks_from_file, get_tensor_input_polytopes_triangs_and_masks_from_file
+from cytransformer.utilities import cleanup, save_output, get_np_input_polytopes_and_masks_from_file, get_tensor_input_polytopes_triangs_and_masks_from_file
 
 from torch.optim.lr_scheduler import ExponentialLR, CosineAnnealingLR, ConstantLR
 
-from Args import ModelParams, EncodingParams, TrainingParams, JobParams, parse_arguments, return_train_data_loader, return_transformer, model_params_from_checkpoint, encoding_params_from_checkpoint
+from cytransformer.args import ModelParams, EncodingParams, TrainingParams, JobParams, parse_arguments, return_train_data_loader, return_transformer, model_params_from_checkpoint, encoding_params_from_checkpoint
 
 
 def setup(global_rank, world_size):

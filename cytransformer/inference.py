@@ -10,7 +10,7 @@ token (a second <sos> or a <pad>) before producing <eos>.
 import numpy as np
 import torch
 
-from utilities import apply_permutation_to_tokens_triang
+from cytransformer.utilities import apply_permutation_to_tokens_triang
 
 
 @torch.inference_mode()

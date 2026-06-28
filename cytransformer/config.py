@@ -11,7 +11,7 @@ frozen model contract.
 
 import yaml
 
-from Args import (
+from cytransformer.args import (
     ModelParams,
     TrainingParams,
     JobParams,

@@ -27,7 +27,8 @@ Polytope configurations are labelled by `(h^{1,1}, N_vert)` — e.g. `(5, 9+1)` 
 ## Install
 
 ```bash
-pip install -r requirements.txt
+pip install -e .          # installs the package + the cyt-prepare / cyt-train / cyt-infer commands
+# or, without installing:  pip install -r requirements.txt
 ```
 
 That is enough to **train** and **generate** — no CYTools needed. CYTools (and `pycddlib`) are
@@ -35,7 +36,7 @@ That is enough to **train** and **generate** — no CYTools needed. CYTools (and
 database, or (b) *validate* that generated candidates are genuine FRSTs:
 
 ```bash
-pip install -r requirements-validation.txt   # plus a CYTools install: https://cytools.liammcallister.com
+pip install -e ".[validation]"   # plus a CYTools install: https://cytools.liammcallister.com
 ```
 
 > Tip: pin `torch` to a build matching your platform/CUDA. CPU works out of the box; for GPU use the
@@ -47,14 +48,16 @@ The three steps below run on **CPU, without CYTools**, using the small example c
 
 ```bash
 # 1. Prepare data: split a raw (polytopes, triangulations) pair into aligned train/val/test sets
-python -m cyt.prepare_data --config configs/prepare_9+1.yaml
+cyt-prepare --config configs/prepare_9+1.yaml
 
 # 2. Train
-python -m cyt.train --config configs/train_9+1.yaml
+cyt-train --config configs/train_9+1.yaml
 
 # 3. Generate FRST candidates from the trained checkpoint
-python -m cyt.infer --config configs/infer_9+1.yaml
+cyt-infer --config configs/infer_9+1.yaml
 ```
+
+(Didn't `pip install`? Use the module form, e.g. `python -m cytransformer.cli.train --config configs/train_9+1.yaml`.)
 
 The example configs are sized for a quick smoke test. For the **paper‑scale model**, use
 `d_model=512, num_heads=16, num_layers=16`, the `exponential` scheduler, `n_steps` in the hundreds of
@@ -83,18 +86,17 @@ config has `model:`, `training:`, and `job:` sections; an inference config is a 
 ## Running on a GPU / RunPod
 
 Set `job.Gpu: true` in the training config. With one GPU it trains single‑process; with several
-visible GPUs it uses PyTorch DistributedDataParallel automatically. A `Singularity_v18.def` is included
-as the basis for a container image (it derives from a CYTools base image, so validation works inside it).
+visible GPUs it uses PyTorch DistributedDataParallel automatically.
 
 ## The frozen model contract
 
 To keep checkpoints interchangeable across versions (and to load original weights), the following are a
 **frozen contract — do not edit**:
-- `Models.py` (architecture / `state_dict` keys),
-- the checkpoint dict schema saved in `train.py` and read by `Args.model_params_from_checkpoint` /
-  `encoding_params_from_checkpoint`,
-- the encoding/tokenization (`Args.encoding_parameters`, the simplex vocabulary in
-  `Polys_triangs_dataset.py`, and the translation helpers in `utilities.py`).
+- `cytransformer/models.py` (architecture / `state_dict` keys),
+- the checkpoint dict schema saved in `cytransformer/train.py` and read by
+  `cytransformer.args.model_params_from_checkpoint` / `encoding_params_from_checkpoint`,
+- the encoding/tokenization (`cytransformer.args.encoding_parameters`, the simplex vocabulary in
+  `cytransformer/dataset.py`, and the translation helpers in `cytransformer/utilities.py`).
 
 `tests/test_checkpoint_contract.py` guards this: it proves a checkpoint round‑trips through the loader
 bit‑for‑bit (run it after any change). Point it at a real checkpoint to verify that file loads:
@@ -106,14 +108,16 @@ python tests/test_checkpoint_contract.py [path/to/checkpoint]
 ## Repository layout
 
 ```
-Models.py Args.py Polys_triangs_dataset.py utilities.py   # frozen core (architecture + encoding)
-inference.py train.py data_generation.py                  # core training / generation
-check_FRST.py check_valid.py monitoring.py                # FRST validation (optional; lazy CYTools)
-RL.py                                                     # self-improvement loop
-config.py                                                # YAML -> params loader
-cyt/                                                     # one-command entrypoints (train, infer, prepare_data)
-configs/                                                 # example YAML configs
-tests/                                                   # checkpoint-contract safety net
+cytransformer/               # the package
+├── models.py args.py dataset.py utilities.py   # frozen core (architecture + encoding)
+├── inference.py train.py data_generation.py    # core training / generation
+├── config.py                                   # YAML -> params loader
+├── cli/                                         # one-command entrypoints: prepare_data, train, infer
+└── validation/                                 # optional, needs CYTools: check_frst, check_valid,
+                                                 #   monitoring, generate_triangs_from_checkpoint, rl
+configs/                     # example YAML configs
+tests/                       # checkpoint-contract safety net
+pyproject.toml  LICENSE  README.md  requirements.txt
 ```
 
 ## Citation

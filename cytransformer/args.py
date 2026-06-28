@@ -15,15 +15,14 @@ checkpoint, so their numbers must stay in sync with how the weights were trained
 import sys
 import os
 import argparse
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import numpy as np
 import math
 import json
 
-from Models import Transformer
-from data_generation import  split_data
+from cytransformer.models import Transformer
+from cytransformer.data_generation import split_data
 from torch.utils.data import DataLoader, DistributedSampler
-from Polys_triangs_dataset import Polys_triangs_dataset
+from cytransformer.dataset import Polys_triangs_dataset
 from torch import Generator
 
 

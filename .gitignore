@@ -19,6 +19,12 @@ Miniconda3-latest-Linux-x86_64.sh
 __pycache__/
 .ipynb_checkpoints/
 test.py
+# packaging / envs
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
 Saved_outputs/*
 !.gitkeep
 RL_data/*

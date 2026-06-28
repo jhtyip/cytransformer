@@ -17,7 +17,7 @@ import torch
 import datetime
 import torch.distributed as dist
 from torch.utils.data import default_collate
-from Polys_triangs_dataset import Polys_triangs_dataset
+from cytransformer.dataset import Polys_triangs_dataset
 import time
 
 import json

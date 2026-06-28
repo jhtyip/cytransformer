@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cytransformer"
+version = "0.1.0"
+description = "Transformer generation of FRST triangulations of Calabi-Yau polytopes"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Jacky H. T. Yip" },
+    { name = "Charles Arnal" },
+    { name = "François Charton" },
+    { name = "Gary Shiu" },
+]
+keywords = ["calabi-yau", "string-theory", "transformer", "triangulation", "machine-learning"]
+dependencies = [
+    "numpy",
+    "scipy",
+    "torch",
+    "matplotlib",
+    "ijson",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+# FRST validation / new-data generation also require a CYTools install
+# (see https://cytools.liammcallister.com).
+validation = ["pycddlib"]
+
+[project.urls]
+Homepage = "https://aicy.physics.wisc.edu"
+Repository = "https://github.com/jhtyip/cytransformer"
+Paper = "https://arxiv.org/abs/2507.03732"
+
+[project.scripts]
+cyt-prepare = "cytransformer.cli.prepare_data:main"
+cyt-train = "cytransformer.cli.train:main"
+cyt-infer = "cytransformer.cli.infer:main"
+
+[tool.setuptools.packages.find]
+include = ["cytransformer*"]
