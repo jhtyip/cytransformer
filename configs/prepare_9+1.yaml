@@ -1,0 +1,12 @@
+# Split raw 9+1 data into aligned train/val/test sets.
+# n_train/n_val/n_test are [start, end] index ranges over polytope GROUPS.
+# (This small example is sized for a quick local smoke test, not the paper run.)
+n_vertices: 9
+polys_file: "Data/9+1_polys_0_4999.json"
+triangs_file: "Data/9+1_triangs_0_4999.json"
+n_train: [0, 30]
+n_val: [30, 40]
+n_test: [40, 50]
+out_dir: "Data/9+1/smoke"
+randomize: true
+seed: 0

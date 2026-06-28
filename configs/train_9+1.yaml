@@ -1,0 +1,46 @@
+# Small/fast local smoke configuration (CPU). NOT the paper run.
+# For the paper model use d_model=512, num_heads=16, num_layers=16,
+# n_steps~400000, scheduler "exponential", and a full data split.
+model:
+  d_model: 64
+  num_heads: 4
+  num_layers: 2
+  d_ff: 256
+  d_ff_enem: 256
+  dropout: 0.1
+
+training:
+  n_vertices: 9
+  n_train: 30
+  n_val: 200
+  n_test: 200
+  batch_size: 8
+  grad_acc_period: 1
+  n_steps: 5
+  lr: 0.00005
+  scheduler: "None"
+  random_seed: 43
+  loss_eval_frequency: 1
+  frst_gen_eval_frequency: 1000000   # only the forced eval at the final step fires
+  checkpoint_frequency: 1000000      # only the forced save at the final step fires
+  N_polys_monitoring: 2
+  numOfTs_per_poly: 2
+  permute_training_polys: true
+  triang_shuffling: true
+  permute_evaluation_polys_once: true
+  permute_evaluation_polys_for_each_triang: false
+  sample_polys_uniformly_for_evaluation: true
+  sample_polys_wrt_number_of_triangs_for_evaluation: false
+
+job:
+  folder_name: "9+1"
+  exp_name: "smoke"
+  continued_training: false
+  num_cpus: 1
+  Gpu: false                         # set true to use a GPU (e.g. on RunPod)
+  polys_file_train: "Data/9+1/smoke/train_polys.json"
+  triangs_file_train: "Data/9+1/smoke/train_triangs.json"
+  polys_file_val: "Data/9+1/smoke/val_polys.json"
+  triangs_file_val: "Data/9+1/smoke/val_triangs.json"
+  polys_file_test: "Data/9+1/smoke/test_polys.json"
+  triangs_file_test: "Data/9+1/smoke/test_triangs.json"

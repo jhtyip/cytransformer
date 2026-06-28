@@ -1,0 +1,9 @@
+# Core dependencies for training and inference (NO CYTools required).
+# Pin torch to a build matching your platform/CUDA; on RunPod use the cu12 wheel
+# that matches the base image's CUDA runtime.
+numpy
+scipy
+torch
+matplotlib
+ijson
+pyyaml
