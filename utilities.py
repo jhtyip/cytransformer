@@ -1,3 +1,14 @@
+"""
+Helper utilities for CYTransformer: data loading/sampling, distributed-training
+setup, output saving, and the format-translation routines that convert between
+the several ways a triangulation can be represented.
+
+The translation helpers (token <-> vertex-index <-> vertex-coordinate, plus the
+permutation remapping) implement the frozen tokenisation contract used to train
+the checkpoints, so their numeric conventions must not change. The block comment
+just below documents the naming convention for each representation.
+"""
+
 import numpy as np
 import itertools
 import math
@@ -22,11 +33,18 @@ vert_coord_wo_triang: List of numpy arrays of shape (5,4) (5 vertices with 4 coo
 """
 
 def get_np_input_polytopes_and_masks_from_file(polys_file, n_vertices, num_of_polys, unique_sampling = True, permutation = True, verbose = False):
-    """The polytopes in the file can be with repetition"""
+    """Load up to ``num_of_polys`` polytopes (no triangulations) as numpy arrays.
+
+    The file may contain repeated polytopes; ``unique_sampling`` deduplicates
+    first. The polytopes are shuffled, truncated to ``num_of_polys``, optionally
+    vertex-permuted (a data-augmentation no-op the model should be invariant to),
+    and returned with an all-ones mask (every vertex is real). The polytopes in
+    the file can be with repetition.
+    """
     with open(polys_file, 'r') as f:
         unprocessed_polys = json.load(f)
 
-    # process
+    # Parse each "{{x,y,z,w},{...}}" vertex string into an (n_vertices, 4) int array.
     unprocessed_polys = np.array([np.array([np.array(vertex.split(",")).astype("int") for vertex in poly[1][2:-2].split("},{")]) for poly in unprocessed_polys])
     if unique_sampling:
         # keep only unique polytopes
@@ -41,10 +59,11 @@ def get_np_input_polytopes_and_masks_from_file(polys_file, n_vertices, num_of_po
 
     # shuffle polys
     np.random.shuffle(unprocessed_polys)
-    # select
+    # select the first num_of_polys
     unprocessed_polys = unprocessed_polys[:num_of_polys,:,:]
     polys = []
     if permutation:
+        # Apply an independent random vertex permutation to each polytope.
         count = 0
         for poly in unprocessed_polys:
             verPerm_idx = np.random.permutation(n_vertices)
@@ -68,7 +87,7 @@ def get_tensor_input_polytopes_triangs_and_masks_from_file(polys_file, triangs_f
     assert len(unprocessed_polys) == len(unprocessed_triangs), "Polytopes and triangulations files must have the same number of entries"
 
 
-    # apply the same shuffling to polys and triangs
+    # Shuffle poly/triang pairs together so the correspondence is preserved.
     indices = np.arange(len(unprocessed_polys))
     np.random.shuffle(indices)
     unprocessed_polys = [unprocessed_polys[i] for i in indices]
@@ -77,6 +96,7 @@ def get_tensor_input_polytopes_triangs_and_masks_from_file(polys_file, triangs_f
     unprocessed_polys = unprocessed_polys[:num_of_samples]
 
 
+    # Encode through the dataset, then collate the per-sample tensors into batches.
     dataset = Polys_triangs_dataset(unprocessed_polys, unprocessed_triangs, n_vertices, max_seq_length_tgt, permutation, triang_shuffling=triang_shuffling, seed=0)
     data = [sample for sample in dataset]
 
@@ -88,6 +108,12 @@ def get_tensor_input_polytopes_triangs_and_masks_from_file(polys_file, triangs_f
 
 
 def file_barrier(barrier_dir, num_procs, proc_id):
+    """Filesystem-based barrier synchronising ``num_procs`` processes/nodes.
+
+    Each process drops a marker file and waits until all markers exist; rank 0
+    then cleans them up. Used where a shared filesystem is available but a proper
+    distributed group is not (e.g. across nodes before/after a sync point).
+    """
     os.makedirs(barrier_dir, exist_ok=True)
     # Each process creates its own file
     open(os.path.join(barrier_dir, f"barrier_{proc_id}"), "w").close()
@@ -134,13 +160,19 @@ def token_decoder(token, N_vertices):
     return simplexList[token]
 
 def apply_permutation_to_tokens_triang(tokens_triang, perm, N_vertices, padding_idx = None):
-    """triang is an array of length L of tokens (tokens_triang)
-        Example: [0, 13, 21, ...]
-        Could maybe speed up ?"""
+    """Relabel a token triangulation under a vertex permutation ``perm``.
+
+    triang is an array of length L of tokens (tokens_triang), e.g. [0, 13, 21, ...].
+    Builds a lookup that maps each simplex token to the token of its permuted
+    (then re-sorted) vertex set, leaving the three special tokens fixed, and
+    applies it to every token in the input. Could maybe speed up?
+    """
     if padding_idx == None:
         padding_idx = math.comb(N_vertices, 4) + 1 + 1
+    # Special tokens (<sos>, <eos>, <pad>) map to themselves.
     permuted_token_dictionary = {token:token for token in [padding_idx-2, padding_idx-1, padding_idx]}
     simplexList = np.array(list(itertools.combinations(np.arange(N_vertices), 4)))
+    # For each simplex token, look up the token of its permuted, re-sorted vertices.
     for token in range( math.comb(N_vertices, 4)):
         token_as_simplex_list = simplexList[token]
         permuted_simplex_list = perm[token_as_simplex_list]
@@ -164,6 +196,7 @@ def tokens_triang_to_vert_indices_woo_triang(tokens_triang, N_vertices, padding_
         padding_idx = math.comb(N_vertices, 4) + 1 + 1
     vert_indices_triang = []
     for simplex_ind in tokens_triang:
+        # Skip the special tokens; decode only real simplex tokens.
         if simplex_ind not in [padding_idx-2, padding_idx-1, padding_idx]:
             vert_indices_triang.append(token_decoder(simplex_ind, N_vertices))
     return vert_indices_triang
@@ -188,19 +221,6 @@ def tokens_triang_to_vert_indices_wo_triang(tokens_triang, N_vertices, padding_i
     return vert_indices_woo_triang_to_vert_indices_wo_triang(vert_indices_woo_triang)
 
 
-    # if padding_idx == None:
-    #     if N_vertices == 9:
-    #         padding_idx = 128
-    #     elif N_vertices == 10:
-    #         padding_idx = 212
-    # vert_indices_triang = []
-    # for simplex_ind in tokens_triang:
-    #     if simplex_ind not in [padding_idx-2, padding_idx-1, padding_idx]:
-    #         # Note the origin being added and all indices being shifted by 1
-    #         vert_indices_triang.append(np.insert(token_decoder(simplex_ind, N_vertices)+1, 0, 0))
-    # return vert_indices_triang
-
-
 def vert_indices_triang_to_vert_coord_triang(polytope, triang):
     """
         polytope of shape (N_vertices-1, 4) (the list of its vertices)
@@ -212,6 +232,7 @@ def vert_indices_triang_to_vert_coord_triang(polytope, triang):
     vert_coord_woo_triang = []
     triang = np.array(triang)
     for i in range(triang.shape[0]):
+        # Skip padding rows (all -1); gather the coordinates of each simplex's vertices.
         if not (-1 in triang[i].tolist()):
             simplex = np.array([polytope[index] for index in triang[i].tolist() ])
             vert_coord_woo_triang.append(simplex)
@@ -225,27 +246,13 @@ def vert_coord_woo_triang_to_vert_coord_wo_triang(vert_coord_woo_triang, dimensi
     return vert_coord_wo_triang
 
 
-# def vert_indices_woo_triang_to_vert_coord_wo_triang(polytope, triang):
-#     """
-#         polytope of shape (N_vertices-1, 4) (the list of its vertices)
-#         triang of shape (L, 4), where L is an upper bound on the number of simplices.
-#         Each row corresponds to a simplex (it contains the indices of its 4 vertices (different from the origin) in the list given by polytope), except the rows with only -1 which are padding (vert_indices_triang)
-#         Output: a list of numpy arrays (5,4), where each array represents a simplex (each row is a vertex (including the origin) given by its 4 coordinates) (vert_coord_wo_triang)
-#     """
-#     vert_coord_woo_triang = vert_indices_woo_triang_to_vert_coord_woo_triang(polytope, triang)
-#     vert_coord_wo_triang = [ np.concatenate( (simplex, np.zeros((1,polytope.shape[1]), dtype = int) ) ) for simplex in vert_coord_woo_triang ]
-#     return vert_coord_wo_triang
-
-
-    # vert_coord_wo_triang = []
-    # triangs = np.array(triangs)
-    # for i in range(triang.shape[0]):
-    #     if not (-1 in triang[i].tolist()):
-    #         simplex = np.array([polytope[index] for index in triang[i].tolist() ] + [ np.zeros(polytope.shape[1], dtype = int)])
-    #         vert_coord_wo_triang.append(simplex)
-    # return vert_coord_wo_triang
-
 def setup(rank, world_size):
+    """Initialise the NCCL distributed process group for this ``rank``.
+
+    Sets the master address/port (port derived from the SLURM job id to avoid
+    collisions between concurrent jobs), pins the CUDA device, and joins the
+    process group with a long timeout to tolerate slow collective operations.
+    """
     os.environ["NCCL_TIMEOUT"] = "36000"
     slurm_job_id = os.environ.get("SLURM_JOB_ID")
     if slurm_job_id is not None:
@@ -274,6 +281,7 @@ def cleanup():
 
 
 if __name__ == "__main__":
+    # Smoke check: decode the first saved triangulation back to vertex indices.
 
     # For N_vert=10+1
     padding_idx = 212

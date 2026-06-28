@@ -1,3 +1,22 @@
+"""
+Raw data generation and dataset splitting for CYTransformer.
+
+Two responsibilities live here:
+  - Generating training data: fetch reflexive polytopes from the CYTools
+    database and enumerate/sample their FRST (Fine Regular Star) triangulations,
+    serialising both into the same JSON layout as the reference 005.poly.json /
+    005.triang.json files (one entry per artefact, keyed by a shared POLYID).
+  - Preparing data for training: loading those JSON files, filtering to
+    polytopes with the desired vertex count, optionally randomising order while
+    keeping each polytope's triangulations grouped, and splitting into
+    train/val/test sets on a per-polytope basis (so no polytope leaks across
+    splits).
+
+The (polytope, triangulation) string encoding used here is the one the
+``Polys_triangs_dataset`` loader parses, so it is part of the frozen data
+contract.
+"""
+
 import numpy as np
 # `cytools` is imported lazily inside the data-generation functions that use it,
 # so the rest of the codebase (training, inference) imports without CYTools installed.
@@ -19,6 +38,7 @@ def process_json_files(filepath_polys, filepath_triangs, N, randomize=True, seed
     with open(filepath_triangs, 'r') as f:
         data_triangs = json.load(f)
 
+    # Index polytopes by POLYID so each triangulation can be paired with its polytope.
     toSave_polys = []
     lookup_dict_polys = {}
     for poly in data_polys:
@@ -27,6 +47,8 @@ def process_json_files(filepath_polys, filepath_triangs, N, randomize=True, seed
     for triang in data_triangs:
         POLYID = triang['POLYID']
         poly = lookup_dict_polys[POLYID]
+        # Keep only polytopes with exactly N+1 vertices: the vertex-string contains
+        # N-1 "},{" separators (N+1 vertices, minus the implicit origin).
         if poly.count('},{') == N - 1:
             toSave_polys.append([POLYID, poly])
             toSave_triangs.append([POLYID, triang['TRIANG']])
@@ -35,6 +57,10 @@ def process_json_files(filepath_polys, filepath_triangs, N, randomize=True, seed
     if randomize:
         random.seed(seed)
 
+        # Shuffle the (poly, triang) pairs, then shuffle again at the polytope-group
+        # level. This randomises both the order of polytopes and the order of
+        # triangulations within a polytope, while keeping a polytope's triangulations
+        # contiguous (so the later per-polytope split stays clean).
         indices = list(range(len(toSave_triangs)))
         random.shuffle(indices)
         toSave_triangs = [toSave_triangs[i] for i in indices]
@@ -63,6 +89,8 @@ def split_data(toSave_polys, toSave_triangs, N_train, N_val, N_test, max_triangs
     N_i looks like [start, end], where start/end indicates the (n+1)-th polytope, then total number of polytopes=end-start
     If max_triangs_per_poly=-1, all triangs are taken
     """
+    # Group consecutive (poly, triang) pairs by POLYID, optionally capping the
+    # number of triangulations kept per polytope.
     groups = []
     for key, group in groupby(zip(toSave_polys, toSave_triangs), key=lambda x: x[0][0]):
         polys_and_triangs = list(group)
@@ -77,6 +105,8 @@ def split_data(toSave_polys, toSave_triangs, N_train, N_val, N_test, max_triangs
         else:
             print(f"Using maximum {max_triangs_per_poly} triangulations for each polytope.")
 
+    # Carve out train/val/test by selecting disjoint ranges of polytope groups,
+    # then flatten each selected range back into flat poly / triang lists.
     polys_train = []
     triangs_train = []
     for i in range(N_train[0], min(N_train[1], len(groups))):
@@ -106,6 +136,11 @@ def split_data(toSave_polys, toSave_triangs, N_train, N_val, N_test, max_triangs
 
 def split_data_into_three_files(filepath_polys, filepath_triangs, filepath_train_polys, filepath_train_triangs, filepath_val_polys, \
                                  filepath_val_triangs, filepath_test_polys, filepath_test_triangs, N_vertices, N_train, N_val, N_test, randomize=True, seed=0):
+    """
+    End-to-end helper: load the raw poly/triang JSON, filter and (optionally)
+    randomise it, split it into train/val/test by polytope range, and write the
+    six resulting JSON files (polys + triangs for each split).
+    """
     print("Splitting data into three files...")
     print("Source files:")
     print(f"Polytopes: {filepath_polys}")
@@ -141,6 +176,12 @@ def split_data_into_three_files(filepath_polys, filepath_triangs, filepath_train
 
 
 def merge_json_chunks(folder: str, mystring: str):
+    """
+    Concatenate the per-chunk JSON files written during generation (named
+    "{mystring}_<index>.json") back into a single "{mystring}.json" list, in
+    ascending chunk-index order.
+    """
+    # Collect the chunk files and order them by the trailing numeric index.
     chunk_files = sorted(
         [f for f in os.listdir(folder) if f.startswith(f"{mystring}") and f.endswith(".json")],
         key=lambda x: int(x.split("_")[-1].split(".")[0])
@@ -196,6 +237,8 @@ def generate_triangs(n_vertices, lower_bound, upper_bound, N_triangs_per_poly, f
     """
     print("Triangulations generation process starting")
     assert 0<= lower_bound and lower_bound < upper_bound, "lower_bound must be positive and lower than upper_bound"
+    # The CYTools database is queried by Hodge number h11; for these 4D reflexive
+    # polytopes h11 = n_vertices - 4 (n_vertices counts the resolved vertices).
     if n_vertices == 9:
         h11 = 5
     elif n_vertices == 10:
@@ -223,6 +266,9 @@ def generate_triangs(n_vertices, lower_bound, upper_bound, N_triangs_per_poly, f
 
     from cytools import fetch_polytopes, Polytope  # lazy import (see note at top of file)
     print("Fetching polytopes")
+    # Fetch a pool of candidate polytopes. With superset_size set we draw from a
+    # larger pool first (so the shuffle below samples from a wider population)
+    # before slicing to the requested [lower_bound, upper_bound) window.
     if not superset_size:
         print(f"Fetching among the first {upper_bound} polytopes")
         gen = fetch_polytopes(h11=h11, lattice="N", limit=upper_bound, as_list=True)
@@ -244,6 +290,9 @@ def generate_triangs(n_vertices, lower_bound, upper_bound, N_triangs_per_poly, f
     start_time = time.time()
     while i < len(gen):
         poly = gen[i]
+        # Obtain triangulations of this polytope. "all" enumerates every FRST
+        # exhaustively; "fast"/"fair" draw a random sample (the latter aims for a
+        # more uniform sample at higher cost).
         if mode == "all":
             triangs_of_poly = poly.all_triangulations(only_fine=True, only_regular=True, only_star=True, as_list=True, star_origin = 0, include_points_interior_to_facets=False)
         elif mode == "fast":
@@ -423,66 +472,3 @@ if __name__ == "__main__":
     triangs_file = f"{str(n_vertices)}+1_triangs.json"
 
     generate_triangs(n_vertices, lower_bound, upper_bound, N_triangs_per_poly, folder, polys_file, triangs_file, mode = mode, seed = 42, superset_size = superset_size)
-
-
-
-
-    # n_vertices = 9
-    # N_poly = 10000
-    # N_triangs_per_poly = None
-    # folder = "Data/Synthetic_data"
-    # polys_file = f"new_synth_data_{n_vertices}+1_polys.json"
-    # triangs_file = f"new_synth_data_{n_vertices}+1_triangs.json"
-    # numTri = generate_triangs(n_vertices, N_poly, N_triangs_per_poly, folder, polys_file, triangs_file, mode = "all")
-
-    # print(f"Total number of triangulations : \n {sum(numTri)}")
-
-    # n_vertices = 10
-    # N_poly = 10000
-    # N_triangs_per_poly = None
-    # folder = "Data/Synthetic_data"
-    # polys_file = f"new_synth_data_{n_vertices}+1_polys.json"
-    # triangs_file = f"new_synth_data_{n_vertices}+1_triangs.json"
-    # numTri = generate_triangs(n_vertices, N_poly, N_triangs_per_poly, folder, polys_file, triangs_file, mode = "all")
-
-    # print(f"Total number of triangulations : \n {sum(numTri)}")
-
-    # n_vertices = 11
-    # N_poly = 6
-    # N_triangs_per_poly = None
-    # folder = "Data/11+1"
-    # polys_file = f"test_synth_data_{n_vertices}+1_polys.json"
-    # triangs_file = f"test_synth_data_{n_vertices}+1_triangs.json"
-    # numTri = generate_triangs(n_vertices, N_poly, N_triangs_per_poly, folder, polys_file, triangs_file, mode = "all")
-
-    # print(f"Total number of triangulations : \n {sum(numTri)}")
-
-    # with open(folder + "/"+ polys_file) as fp:
-    #     polys = json.load(fp)  # Polytopes
-    # with open(folder + "/"+ triangs_file) as fp:
-    #     triangs = json.load(fp)  # FRSTs
-    # print(f"Check number of polytopes : {len(polys)}")
-    # print(f"Check number of triangs : {len(triangs)}")
-
-
-
-
-    # # Test the data generated
-    # from data_loader import Dataloader
-    # if n_vertices == 9:
-    #     padding_idx = 128
-    #     max_seq_length_tgt = 30  # Sufficiently large
-    #     max_seq_length_src = 9  # 9 vertices
-    # elif n_vertices == 10:
-    #     padding_idx = 212
-    #     max_seq_length_tgt = 35  # Sufficiently large
-    #     max_seq_length_src = 10  # 10 vertices
-
-    # n_train, n_val, n_test = 10, 10, 10
-
-    # data_loader = Dataloader(max_seq_length_tgt = max_seq_length_tgt, max_seq_length_src = max_seq_length_src, \
-    #                           padding_idx = padding_idx, triangs_file = triangs_file, polys_file = polys_file, n_train = n_train, n_val = n_val, n_test = n_test)
-    # print("Generate a batch")
-    # data_loader.get_data(5, "train")
-    # data_loader.get_data(5, "test")
-    # data_loader.get_data(5, "val")

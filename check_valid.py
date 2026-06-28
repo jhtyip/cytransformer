@@ -1,10 +1,21 @@
+"""
+Pure-geometry validity check for triangulations (independent of CYTools).
+
+A triangulation is treated as a list of simplices given by their vertex
+coordinates. It is "valid" when (1) the simplices tile the polytope without
+gaps or overlaps -- their volumes sum to the polytope's volume -- and (2) every
+pair of simplices intersects "cleanly", i.e. their geometric intersection is
+exactly the convex hull of their shared vertices (a common face), never a
+partial overlap. The pairwise face check is done exactly with rationals via
+pycddlib, so it does not depend on the FRST machinery in check_FRST.py and acts
+as an independent cross-validation of it.
+"""
 
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import numpy as np
-#import pyvista as pv
 from fractions import Fraction
 from collections import Counter
 from scipy.spatial import ConvexHull
@@ -61,11 +72,19 @@ def compute_intersection(poly1, poly2):
 
 
 def check_valid_intersection(simplex1, simplex2, verbose = False):
+    """
+    Return True iff two simplices meet "cleanly", i.e. their geometric
+    intersection coincides with the set of vertices they share (a common face,
+    a single shared vertex, or nothing at all). Returns False for any partial
+    overlap, containment, or mismatch between the geometric intersection and the
+    shared-vertex set -- the situations that make a triangulation invalid.
+    """
     # Find the geometric intersection of the two convex hulls
     geom_intersection = compute_intersection(simplex1, simplex2).tolist()
 
-    # Check the intersection of faces of the two convex hulls
+    # The vertices the two simplices literally share (their would-be common face).
     common_vertices = [vertex for vertex in simplex1 if  np.any(np.all(vertex == simplex2, axis=1))]
+    # If every vertex of one simplex is shared, one is contained in the other -- invalid.
     if  len(common_vertices) == len(simplex1) or len(common_vertices) == len(simplex2):
         if verbose:
             print("One of the simplices is included in the other")
@@ -129,6 +148,8 @@ def check_valid_triangulation(triangulation, total_volume, verbose = False):
     In particular, triangulation should be a vert_coord_wo_triang (with floats), using our conventions
     """
     N = len(triangulation)
+    # Coverage check: the simplices must exactly fill the polytope. A degenerate
+    # (flat) simplex makes ConvexHull raise, which itself signals an invalid tiling.
     try:
         sum_of_volumes = np.sum([compute_volume(simplex) for simplex in triangulation])
     except:
@@ -139,6 +160,7 @@ def check_valid_triangulation(triangulation, total_volume, verbose = False):
         if verbose:
             print("Invalid volume")
         return False
+    # Overlap check: every pair of simplices must meet only along a shared face.
     for i in range(N):
         for j in range(i+1, N):
             if not check_valid_intersection(triangulation[i], triangulation[j], verbose = verbose):
@@ -206,26 +228,6 @@ if __name__ == "__main__":
     print("Success" if check_valid_intersection(simplex1, simplex2) else "failure" )  # Expected
 
 
-    # cube1 = pv.Cube()
-    # cube2 = pv.Cube() 
-    # cube2.translate((0.5, 0.5, 0.5), inplace = True)
-    # # Remove duplicates from the PyVista cubes
-    # simplex1 = np.array(cube1.points[0:8, :])
-    # simplex2 = np.array(cube2.points[0:8, :])
-    # print(f"Test case {i}")
-    # print(f"Intersection {compute_intersection(simplex1, simplex2)}")
-    # print("Success" if check_valid_intersection(simplex1, simplex2) else "failure" )  # Expected
-
-
-    # simplex = np.array([[0, 0], [1, 1], [1, 0], [0, 1]])
-    # print(f"Volume of simplex1: {compute_volume(simplex)}")  # Expected 1
-    # simplex = np.array(cube1.points[0:8, :])
-    # print(f"Volume of simplex2: {compute_volume(simplex)}")  # Expected 1
-    # simplex = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]])
-    # print(f"Volume of simplex2: {compute_volume(simplex)}")  # Expected 1/6
-
-
-
     # Test case 7: valid triangulation
     i+=1
     print(f"Test case {i}")
@@ -284,23 +286,10 @@ if __name__ == "__main__":
     with open('Data/Various/FRSTs_indices.json', 'r') as file:
         frst_indices = json.load(file)
 
-    # print(len(polytopes))
-    # print(len(triangs))
     print(f"first polytope {polytopes[0]}")
     print(f"first triangulation {vert_indices_wo_triang[0]}")
     # no need to add the origin and shift the indices, as it was already included in both the triangulation and the polytope
     print(f"first triangulation adapted {vert_indices_triang_to_vert_coord_triang(polytopes[0],vert_indices_wo_triang[0])}")
-
-
-
-
-    # # test specific triangulations
-    # print(triangs[2])
-    # print(polytopes[2])
-    # all_simplices = polytope_and_triang_to_list_of_simplices(polytopes[2], triangs[2])
-    # print(f"suspicious simplex {triangs[2][15]}")
-    # for i in triangs[2][15]:
-    #     print(polytopes[2][i])
 
 
     print(len(frst_indices))
@@ -325,12 +314,6 @@ if __name__ == "__main__":
         else:
             n_valid += 1
 
-        
+
     print("Done")
-
-
-    # # print(f"len(dresverts): {len(dresverts)}")
-    # # print(f"len(frsts): {len(frsts)}")
-
-
 

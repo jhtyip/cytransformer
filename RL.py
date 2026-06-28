@@ -1,3 +1,17 @@
+"""
+Self-improvement ("RL") training loop for the CYTransformer.
+
+Each iteration: train the model on the current data, generate fresh
+triangulations from the resulting checkpoint, keep only those that are valid
+FRSTs, merge the newly discovered ones (deduplicated) back into the dataset, and
+repeat. The growing pool of model-found FRSTs is what drives improvement -- the
+model is effectively trained on its own best discoveries.
+
+Multi-node aware: GPU work is spawned per rank, while the CPU-side data
+bookkeeping (evaluation, merging, saving) is done only on node 0, with
+file-based barriers keeping the nodes in step.
+"""
+
 import os
 
 import torch
@@ -23,12 +37,6 @@ from Args import ModelParams, EncodingParams, TrainingParams, JobParams, RLParam
 from train import train
 
 
-
-
-
-
-
-
 def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: ModelParams, encoding_params: EncodingParams, training_params: TrainingParams, job_params: JobParams, RL_params: RLParams):
     """
 
@@ -45,7 +53,6 @@ def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: Mode
     random.seed(training_params.random_seed)
     torch.manual_seed(training_params.random_seed)
 
-
     starting_time = time.time()
     if node_rank == 0:
         print("Starting RL training")
@@ -55,6 +62,8 @@ def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: Mode
 
     rl_data_folder = RL_params.rl_data_folder + f"/{job_params.exp_name}"
 
+    # Resume from the latest iteration if this RL run already has data on disk;
+    # otherwise bootstrap iteration 0 from the seed dataset.
     if os.path.exists(rl_data_folder) and len(os.listdir(rl_data_folder)) > 0:
         # find current iteration
         iteration = max([int(iteration_folder_name.split("_")[1]) for iteration_folder_name in os.listdir(rl_data_folder)])
@@ -80,17 +89,17 @@ def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: Mode
 
     time.sleep(3)  # Wait for a few seconds to ensure the files are copied
 
-
+    # Each RL iteration trains for this many additional steps.
     n_steps_per_iteration = training_params.n_steps
 
-
-
     while iteration < RL_params.n_iterations:
+        # File-based barrier so all nodes enter the iteration together.
         file_barrier(rl_data_folder + "barriers/barrier_start_iteration", num_nodes, node_rank)
         if node_rank == 0:
             print(f"\n\n############\nStarting RL iteration {iteration}")
         iteration_starting_time = time.time()
-        # Set the data folder for this iteration
+        # Point training at this iteration's data and set the cumulative step target
+        # (training resumes from the previous checkpoint, so n_steps keeps growing).
         job_params.polys_file_train = f"{rl_data_folder}/iteration_{iteration}/polys.json"
         job_params.triangs_file_train = f"{rl_data_folder}/iteration_{iteration}/triangs.json"
         training_params.n_steps = (iteration+1)*n_steps_per_iteration
@@ -106,6 +115,8 @@ def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: Mode
 
         train_time = time.time()
         ### Train the model
+        # Spawn one training process per GPU (or run inline on a single GPU). The
+        # iteration==0 flag is passed as the verbose argument of train().
         if node_rank == 0:
             print(f"\n##\nTraining the model")
         if world_size > 1:
@@ -119,8 +130,7 @@ def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: Mode
             print(f"Training time: {np.round((time.time()-train_time)/3600, decimals=2)} h")
         if not RL_params.no_rl:
             ### Generate triangulations
-
-
+            # Use the freshest (highest-step) checkpoint just produced by training.
             checkpoints_folder = f'Checkpoints/{job_params.folder_name}/{job_params.exp_name}'
             last_epoch = max([int(checkpoint_name.split("-")[1]) for checkpoint_name in os.listdir(checkpoints_folder)])
             checkpoint_path = f'{checkpoints_folder}/chkpt-{last_epoch}'
@@ -158,6 +168,7 @@ def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: Mode
 
                 evaluation_starting_time = time.time()
 
+                # Load the just-generated samples and check which are valid FRSTs.
                 # NOTE: the polys are not necessarily unique (depending on RL_params.sample_polys_uniformly_for_new_data_generation)
                 new_polys = np.load(new_data_folder+ "/new_data_polys_monitoring.npy") # of shape (n_polys, n_vertices, 4)
                 new_polys_masks = np.load(new_data_folder+ "/new_data_poly_masks_monitoring.npy")
@@ -168,6 +179,7 @@ def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: Mode
                 else:
                     results = monitor_perf(new_polys, new_polys_masks, new_triangs)
 
+                # Boolean mask (n_polys, n_triangs): which samples are genuine FRSTs.
                 FRST_indices = results["FRST_indices"] # the important info
                 print(f"Total number of triangulations: {new_triangs.shape[0]*new_triangs.shape[1]}")
                 printable_results = {k: int(v) for k, v in results.items() if k != "FRST_indices"}
@@ -183,6 +195,9 @@ def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: Mode
                     current_triangs = json.load(fp)
                 with open(f"{rl_data_folder}/iteration_{iteration}/polys.json") as fp:
                     current_polys = json.load(fp)
+                # Re-encode the existing triangulations (stored as vertex-index strings)
+                # into the model's token format, grouped by polytope id, so the new
+                # FRSTs can be merged and deduplicated in a common representation.
                 current_poly_ids = list(set([poly[0] for poly in current_polys]))
                 current_triangs_dict = {id:[] for id in current_poly_ids}
                 simplexList = np.array(list(itertools.combinations(np.arange(training_params.n_vertices), 4)))
@@ -199,6 +214,8 @@ def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: Mode
                     current_triangs_dict[triang[0]].append(triang_as_tokens)
                 # current_triangs_dict is now a dictionary with keys polyids and values lists of triangulations as lists of tokens
 
+                # Match each generated polytope back to its dataset polyid by comparing
+                # vertex sets (generation may have permuted/duplicated the polytopes).
                 # Find the polyids of the polys in new_polys
                 polyids_in_new_polys = []   # a list of length n_polys (not all polyids are necessarily unique)
                 # process the current polys and remove duplicates
@@ -214,7 +231,7 @@ def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: Mode
                             polyids_in_new_polys.append(current_poly[1])
                 assert len(polyids_in_new_polys) == new_triangs.shape[0], f"polyids_in_new_polys not of length new_triangs.shape[0], {len(polyids_in_new_polys)} vs {new_triangs.shape[0]} ({new_triangs.shape = })"
 
-                # Keep only the FRSTs in the new triangulations
+                # Keep only the FRSTs in the new triangulations, grouped by polyid.
                 new_triangs_dict = {}
                 for index_poly, polyid in enumerate(polyids_in_new_polys):
                     new_FRSTs_for_poly = []
@@ -233,15 +250,19 @@ def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: Mode
                     merged_triangs_for_poly = current_triangs_dict[polyid] + new_triangs_dict[polyid]
                     merged_triangs_for_poly = np.array(merged_triangs_for_poly)
                     merged_triangs_for_poly.sort(axis=1)  # Sort the simplices in each triangulation
+                    # Collapse the three special tokens to a single value so duplicate
+                    # triangulations compare equal regardless of sos/eos/pad placement.
                     merged_triangs_for_poly[np.isin(merged_triangs_for_poly, [encoding_params.padding_idx-2, encoding_params.padding_idx-1, encoding_params.padding_idx])] = encoding_params.padding_idx
                     merged_triangs_for_poly, _ = np.unique(merged_triangs_for_poly, return_inverse=True, axis=0)
+                    # Net gain in distinct triangulations for this polytope.
                     new_triangulations_found += len(merged_triangs_for_poly) - len(current_triangs_dict[polyid])
                     assert len(merged_triangs_for_poly) - len(current_triangs_dict[polyid]) >= 0, "Some triangulations disappeared"
                     current_triangs_dict[polyid] = merged_triangs_for_poly
 
                 print(f"New FRSTs found: {new_triangulations_found}")
 
-                # Save the triangulations in a new file
+                # Write the merged dataset as iteration+1's data, converting the token
+                # triangulations back to the on-disk vertex-index string format.
                 print(f"Saving the new data in {rl_data_folder}/iteration_{iteration+1}")
                 os.makedirs(f"{rl_data_folder}/iteration_{iteration+1}", exist_ok=True)
                 triangs_to_save = []
@@ -260,6 +281,8 @@ def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: Mode
                     json.dump(polys_to_save, f, indent=2)
 
         else:
+            # no_rl mode (ablation): skip generation entirely and just carry the same
+            # data forward, so the model keeps training on the fixed seed dataset.
             print("Not true RL, no triangulations generated")
             os.makedirs(f"{rl_data_folder}/iteration_{iteration+1}", exist_ok=True)
             os.system(f"cp {rl_data_folder}/iteration_{iteration}/polys.json {rl_data_folder}/iteration_{iteration+1}/polys.json")
@@ -279,6 +302,8 @@ def RL_train(world_size, node_rank, num_nodes, gpus_per_node, model_params: Mode
 
 if __name__ == "__main__":
 
+    # Read the multi-node topology from the SLURM environment (defaults to a single
+    # node / no SLURM), then launch the RL self-improvement loop.
     args = parse_arguments()
     gpus_per_node = torch.cuda.device_count()
     node_rank = int(os.environ.get("SLURM_NODEID", 0)) if "SLURM_NODEID" in os.environ else 0

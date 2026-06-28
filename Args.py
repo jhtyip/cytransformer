@@ -1,3 +1,16 @@
+"""
+Central configuration for CYTransformer experiments.
+
+Defines the typed parameter containers (model / encoding / training / RL / job)
+that carry hyperparameters through the codebase, the command-line parser that
+populates them, and a few factory helpers that build a Transformer or a training
+DataLoader from those parameters.
+
+The ``encoding_parameters`` / ``model_params_from_checkpoint`` /
+``encoding_params_from_checkpoint`` helpers are part of the frozen contract: they
+reconstruct the exact vocabulary sizes and architecture used to train a saved
+checkpoint, so their numbers must stay in sync with how the weights were trained.
+"""
 
 import sys
 import os
@@ -15,13 +28,16 @@ from torch import Generator
 
 
 class Params:
+    """Base class giving every parameter container a uniform pretty-printer."""
     def display(self):
+        # Print every non-dunder attribute as "name: value".
         for attr_name in dir(self):
             if not attr_name.startswith('__'):
                 attr_value = getattr(self, attr_name)
                 print(f"{attr_name}: {attr_value}")
 
 class ModelParams(Params):
+    """Transformer architecture hyperparameters."""
     d_model_src: int = 4  # Vertex coordinates in 4D; fixed
     d_model_tgt: int = 1  # Class indices; fixed
     d_model: int = 256
@@ -32,12 +48,19 @@ class ModelParams(Params):
     dropout: int = 0.1
 
 class EncodingParams(Params):
+    """Tokenisation sizes derived from the number of polytope vertices.
+
+    The vocabulary is the C(N, 4) simplex tokens plus the three special tokens
+    <sos>/<eos>/<pad>; ``padding_idx`` is the id of the <pad> token. Defaults are
+    for the 9-vertex case and are overwritten by ``encoding_parameters``.
+    """
     padding_idx: int = math.comb(9, 4) + 1 + 1
     tgt_vocab_size: int = math.comb(9, 4) + 1 + 1 + 1
     max_seq_length_tgt: int = 30
     max_seq_length_src: int = 9
 
 class TrainingParams(Params):
+    """Optimisation, data-sampling and evaluation/monitoring settings."""
     n_vertices: int = 9
 
     split_by_polytope: bool = True
@@ -74,6 +97,8 @@ class TrainingParams(Params):
     resume_from_checkpoint: bool = False
 
 class RLParams(Params):
+    """Settings for the self-improvement (reinforcement-learning) loop that
+    periodically generates fresh triangulations and retrains on them."""
     rl_data_folder: str = "RL_data/RL_debug"
     n_iterations: int = 5
     n_polys_for_guesses: int = 1000
@@ -87,6 +112,8 @@ class RLParams(Params):
 
 
 class JobParams(Params):
+    """Run-level bookkeeping: experiment naming, data file paths, compute
+    resources and the relaunch policy for long (job-array) trainings."""
     folder_name: str = "9+1"
     exp_name: str = "template_run"
 
@@ -107,17 +134,16 @@ class JobParams(Params):
 
     Gpu: bool = True
 
-# Legacy
-# def return_data_loader(training_params: TrainingParams, encoding_params: EncodingParams, job_params: JobParams, verbose = True):
-#     data_loader = Dataloader(max_seq_length_tgt = encoding_params.max_seq_length_tgt, max_seq_length_src = encoding_params.max_seq_length_src, \
-#                                 padding_idx = encoding_params.padding_idx, triangs_file = job_params.triangs_file, polys_file = job_params.polys_file, \
-#                                     n_train = training_params.n_train, n_val = training_params.n_val, n_test = training_params.n_test, \
-#                                         split_by_polytope = training_params.split_by_polytope, max_number_triangs_per_polytope = training_params.max_number_triangs_per_polytope, verbose = verbose)
-#     return data_loader
-
-
 
 def return_train_data_loader(training_params: TrainingParams, encoding_params: EncodingParams, job_params: JobParams, world_size: int, global_rank: int, verbose = True):
+    """Build the distributed training DataLoader from the configured data files.
+
+    Loads the train/val/test poly+triang JSON files (all are opened so their
+    sizes can be sanity-checked), slices out the first ``n_train`` training
+    samples, wraps them in a ``Polys_triangs_dataset`` with augmentation, and
+    attaches a ``DistributedSampler`` so each rank sees a disjoint shard. Only
+    the training loader is returned; val/test are handled elsewhere.
+    """
     N_vertices = encoding_params.max_seq_length_src
     max_seq_length_tgt = encoding_params.max_seq_length_tgt
     with open(job_params.polys_file_train, 'r') as f:
@@ -140,7 +166,9 @@ def return_train_data_loader(training_params: TrainingParams, encoding_params: E
     if verbose:
         print(f"Max number of points available in train file, val file, test file: {len(train_polys)}, {len(val_polys)}, {len(test_polys)}")
 
+    # Keep only the first n_train training samples (val/test slices left empty here).
     polys_train, triangs_train, _, _, _, _ = split_data(train_polys, train_triangs, [0,min(len(train_polys), training_params.n_train)], [0,0], [0,0], training_params.max_number_triangs_per_polytope)
+    # Seed is offset by the rank so each process augments with a different stream.
     dataset_train = Polys_triangs_dataset(polys_train, triangs_train, N_vertices, max_seq_length_tgt, training_params.permute_training_polys, triang_shuffling=training_params.triang_shuffling, seed = training_params.random_seed+global_rank)
 
     if verbose:
@@ -168,100 +196,9 @@ def return_train_data_loader(training_params: TrainingParams, encoding_params: E
 
     return loader_train
 
-# LEGACY
-# def return_data_loaders(training_params: TrainingParams, encoding_params: EncodingParams, job_params: JobParams, world_size: int, global_rank: int, verbose = True):
-#     N_vertices = encoding_params.max_seq_length_src
-#     max_seq_length_tgt = encoding_params.max_seq_length_tgt
-#     with open(job_params.polys_file_train, 'r') as f:
-#         train_polys = json.load(f)
-#     with open(job_params.triangs_file_train, 'r') as f:
-#         train_triangs = json.load(f)
-#     with open(job_params.polys_file_val, 'r') as f:
-#         val_polys = json.load(f)
-#     with open(job_params.triangs_file_val, 'r') as f:
-#         val_triangs = json.load(f)
-#     with open(job_params.polys_file_test, 'r') as f:
-#         test_polys = json.load(f)
-#     with open(job_params.triangs_file_test, 'r') as f:
-#         test_triangs = json.load(f)
-
-
-#     assert len(train_polys) == len(train_triangs), "Number of polygons and triangulations in training set must match."
-#     assert len(val_polys) == len(val_triangs), "Number of polygons and triangulations in validation set must match."
-#     assert len(test_polys) == len(test_triangs), "Number of polygons and triangulations in test set must match."
-#     if verbose:
-#         print(f"Max number of points available in train file, val file, test file: {len(train_polys)}, {len(val_polys)}, {len(test_polys)}")
-
-#     polys_train, triangs_train, _, _, _, _ = split_data(train_polys, train_triangs, [0,min(len(train_polys), training_params.n_train)], [0,0], [0,0], training_params.max_number_triangs_per_polytope)
-#     dataset_train = Polys_triangs_dataset(polys_train, triangs_train, N_vertices, max_seq_length_tgt, True, seed = training_params.random_seed+global_rank)
-#     _, _, polys_val, triangs_val, _, _ = split_data(val_polys, val_triangs, [0,0], [0,min(len(val_polys), training_params.n_val)], [0,0], training_params.max_number_triangs_per_polytope)
-#     dataset_val = Polys_triangs_dataset(polys_val, triangs_val, N_vertices, max_seq_length_tgt, True, seed = training_params.random_seed+global_rank)
-#     _, _, _, _, polys_test, triangs_test  = split_data(test_polys, test_triangs, [0,0], [0,0], [0,min(len(test_polys), training_params.n_test)], training_params.max_number_triangs_per_polytope)
-#     dataset_test = Polys_triangs_dataset(polys_test, triangs_test, N_vertices, max_seq_length_tgt, True, seed = training_params.random_seed+global_rank)
-
-#     if verbose:
-#         print(f"Train dataset: {len(dataset_train)} samples")
-#         print(f"Validation dataset: {len(dataset_val)} samples")
-#         print(f"Test dataset: {len(dataset_test)} samples")
-
-
-#     # Create samplers for distributed training
-
-#     sampler_train = DistributedSampler(
-#     dataset_train,
-#     num_replicas=world_size,
-#     rank=global_rank
-# )
-#     sampler_val = DistributedSampler(
-#     dataset_val,
-#     num_replicas=world_size,
-#     rank=global_rank
-# )
-#     sampler_test = DistributedSampler(
-#     dataset_test,
-#     num_replicas=world_size,
-#     rank=global_rank
-# )
-
-#     # Create dataloaders
-#     loader_train = DataLoader(
-#     dataset_train,
-#     batch_size=training_params.batch_size,
-#     sampler=sampler_train,
-#     num_workers=job_params.num_cpus,
-#     pin_memory=True,
-#     drop_last=True,
-#     persistent_workers=True,  # Use persistent workers for faster data loading
-# )
-
-#     loader_val = DataLoader(
-#     dataset_val,
-#     batch_size=training_params.batch_size,
-#     sampler=sampler_val,
-#     num_workers=job_params.num_cpus,
-#     pin_memory=True,
-#     drop_last=True,
-#     persistent_workers=True,  # Use persistent workers for faster data loading
-# )
-
-#     loader_test = DataLoader(
-#     dataset_test,
-#     batch_size=training_params.N_polys_monitoring//world_size, # !!!
-#     sampler=sampler_test,
-#     num_workers=job_params.num_cpus,
-#     pin_memory=True,
-#     drop_last=True,
-#     persistent_workers=True,  # Use persistent workers for faster data loading
-# )
-
-#     # if verbose:
-#     #     print(f"Train loader: {len(loader_train)} batches")
-#     #     print(f"Validation loader: {len(loader_val)} batches")
-#     #     print(f"Test loader: {len(loader_test)} batches")
-
-#     return loader_train, loader_val, loader_test
 
 def return_transformer(model_params: ModelParams, encoding_params: EncodingParams, device):
+    """Instantiate a ``Transformer`` from the model and encoding parameters."""
     transformer = Transformer(
         d_model_src=model_params.d_model_src,
         d_model_tgt=model_params.d_model_tgt,
@@ -281,6 +218,13 @@ def return_transformer(model_params: ModelParams, encoding_params: EncodingParam
 
 
 def encoding_parameters(n_vertices: int):
+    """Return the EncodingParams for a given vertex count.
+
+    Vocabulary = C(n_vertices, 4) simplex tokens + <sos> + <eos> + <pad>, so the
+    pad token is the last id. The per-case ``max_seq_length_tgt`` values are the
+    empirically chosen upper bounds on the number of simplices in a triangulation
+    for that vertex count. Part of the frozen checkpoint contract.
+    """
     assert n_vertices in [9, 10, 11, 12, 13, 14, 15, 20], "Invalid number of vertices."
     encoding_params = EncodingParams()
     encoding_params.tgt_vocab_size = math.comb(n_vertices, 4) + 1 + 1 + 1
@@ -313,6 +257,7 @@ def encoding_parameters(n_vertices: int):
 
 
 def model_params_from_checkpoint(checkpoint):
+    """Rebuild ModelParams from a saved checkpoint's stored hyperparameters."""
     model_params = ModelParams()
     model_params.d_model = checkpoint['hyperparams']['d_model']
     model_params.num_heads = checkpoint['hyperparams']['num_heads']
@@ -324,11 +269,18 @@ def model_params_from_checkpoint(checkpoint):
 
 
 def encoding_params_from_checkpoint(checkpoint):
+    """Rebuild EncodingParams from the vertex count stored in the checkpoint."""
     return encoding_parameters(checkpoint['n_vertices'])
 
 
 
 def parse_arguments():
+    """Parse command-line arguments and pack them into the parameter objects.
+
+    Boolean flags are passed as the strings 'True'/'False' and converted below;
+    the parsed values are then distributed into ModelParams, EncodingParams,
+    TrainingParams, JobParams and RLParams, which are returned as a tuple.
+    """
     parser = argparse.ArgumentParser(description="Parse training parameters.")
 
     # ModelParams
@@ -396,6 +348,7 @@ def parse_arguments():
 
     args = parser.parse_args()
 
+    # Convert the string-encoded boolean flags into real booleans.
     args.split_by_polytope = args.split_by_polytope.lower() == 'true'
     args.resume_from_checkpoint = args.resume_from_checkpoint.lower() == 'true'
     args.continued_training = args.continued_training.lower() == 'true'

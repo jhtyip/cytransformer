@@ -1,5 +1,17 @@
+"""
+Training entrypoint for the CYTransformer.
+
+Trains the encoder-decoder Transformer to map a reflexive polytope to a
+triangulation, using teacher forcing and cross-entropy over the simplex-token
+vocabulary. Supports single-process and multi-GPU (DistributedDataParallel)
+runs, and checkpoint-based resumption so a long job can be stopped before a
+time limit and relaunched. Periodically it also monitors progress by actually
+generating triangulations (via the inference sampler) and saving them.
+"""
+
 import os
 import torch
+# CPU threading / affinity knobs, kept here for reference when tuning CPU runs.
 # os.environ["OMP_NUM_THREADS"] = "10"
 # os.environ["MKL_NUM_THREADS"] = "10"
 # os.environ["OMP_DYNAMIC"]     = "FALSE"
@@ -40,6 +52,7 @@ def setup(global_rank, world_size):
     )
 
 def set_seeds(base_seed, global_rank):
+    # Offset the seed by rank so each process draws a different augmentation stream.
     seed = base_seed + global_rank
     np.random.seed(seed)
     random.seed(seed)
@@ -53,10 +66,12 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
     If job_params.continued_training is true, at launch, the function tries to load a model from checkpoint_from_which_to_resume_dir, along with the number of steps already trained.
     If this number is smaller than training_params.n_steps, the training is continued from this checkpoint.
     """
+    # Derive this process's global rank from its node and local position.
     global_rank = node_rank * gpus_per_node + local_rank
     print(f"Global rank: {global_rank}, Local rank: {local_rank}, Node rank: {node_rank}, World size: {world_size}, GPUs per node: {gpus_per_node}")
     if global_rank == 0:
         print(f"Process started with global rank: {global_rank}")
+    # Only spin up the distributed process group when there is more than one GPU.
     parallelism = world_size > 1
     if parallelism:
         setup(global_rank, world_size)
@@ -101,7 +116,6 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
         device = torch.device(f'cuda:{local_rank}')  # Explicitly assign the device
     else:
         device = torch.device('cpu')
-    # torch.set_default_device(device)  # Set the default device for the current process
     torch.set_default_dtype(torch.float32)   # Set the default data type
 
 
@@ -121,7 +135,8 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
 
 
     first_loop_after_reloading = False
-    # Open the checkpoint directory and see if there is already a model stored there:
+    # Resume from a checkpoint only if continued_training is on AND the directory
+    # already holds at least one checkpoint from a previous run.
     reloading = job_params.continued_training and os.listdir(checkpoint_dir)
     if reloading:
         first_loop_after_reloading = True
@@ -131,7 +146,9 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
         # among the checkpoint_files whose names are chkpt-<step>, we take the one with the maximum step
         checkpoint_file = max(checkpoint_files, key=lambda x: int(x.split('-')[1]))
         checkpoint = torch.load(os.path.join(checkpoint_dir, checkpoint_file), map_location=device)
+        # Resume from the step after the one that was last saved.
         current_step = checkpoint['last_step'] + 1
+        # Rebuild the model/encoding from the checkpoint's own hyperparams.
         # Should normally be the same as those given as arguments to train
         model_params = model_params_from_checkpoint(checkpoint)
         encoding_params = encoding_params_from_checkpoint(checkpoint)
@@ -144,9 +161,11 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
             eps=training_params.eps
         )
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        # Restore the running loss histories so plots stay continuous.
         loss_train = checkpoint['loss']
         loss_val = checkpoint['validation']
     else:
+        # Fresh run: build a new model and start the loss histories empty.
         if global_rank == 0:
             print("Initializing a new model")
         current_step = 0
@@ -162,11 +181,10 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
     if global_rank == 0:
         print('There are', sum(p.numel() for p in transformer.parameters()), 'parameters.')
 
-    # Define loss function and optimizer
+    # Define loss function and optimizer. Padding positions are ignored in the loss.
     criterion = nn.CrossEntropyLoss(ignore_index=encoding_params.padding_idx)
 
-
-
+    # Select the learning-rate schedule; fall back to a constant LR on unknown names.
     if training_params.scheduler == "None":
         scheduler = ConstantLR(optimizer, factor=1, total_iters=1)
     elif training_params.scheduler == "cosine":
@@ -181,6 +199,7 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
     if reloading:
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
+    # Nothing to do if a resumed run has already reached the target step count.
     if current_step >= training_params.n_steps:
         if global_rank == 0:
             print(f"Training already completed, last step: {current_step}")
@@ -190,6 +209,7 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
 
     optimizer.zero_grad()
     training_start = time.time()
+    # Wrap the model for multi-GPU data parallelism (gradients are all-reduced).
     if parallelism:
         transformer = nn.parallel.DistributedDataParallel(transformer, device_ids=[torch.cuda.current_device()], output_device=torch.cuda.current_device())
         torch.cuda.synchronize(torch.cuda.current_device())
@@ -200,36 +220,44 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
     epoch = 0
     step = current_step
 
+    # Outer loop over epochs; training stops from inside once the step target or
+    # the scheduled time limit is hit (there is no fixed number of epochs).
     while True:
+        # Reseed the distributed sampler each epoch so shards are reshuffled.
         loader_train.sampler.set_epoch(epoch)
 
         sub_step = 0
         for src_data, tgt_data, src_mask_data in loader_train:
-
 
             transformer.train()
             src_data = src_data.to(device, non_blocking=True, dtype=torch.float32)
             tgt_data = tgt_data.to(device, non_blocking=True, dtype=torch.int64)
             src_mask_data = src_mask_data.to(device, non_blocking=True, dtype=torch.int64)
 
-            # Forward pass
+            # Forward pass (teacher forcing). The loss compares the model's
+            # predictions at positions 0..n-1 against the tokens at 1..n, i.e. the
+            # decoder predicts each next simplex token given the previous ones.
             output = transformer(src_data, tgt_data, src_mask_data)
             loss = criterion(output[:, :-1, :].contiguous().view(-1, encoding_params.tgt_vocab_size),
                             tgt_data[:, 1:].contiguous().view(-1))
             loss_train.append(loss.item())
             loss.backward()
             sub_step += 1
+            # Gradient accumulation: only step the optimizer every grad_acc_period
+            # micro-batches, giving an effective batch grad_acc_period times larger.
             if sub_step % training_params.grad_acc_period == 0:
                 optimizer.step()
                 optimizer.zero_grad()
+                # Advance the LR schedule (cosine every step; exponential rarely).
                 if training_params.scheduler in ["cosine"]:
                     scheduler.step()
                 elif training_params.scheduler in ["exponential"] and step%100000 == 0 and step >0:
                     scheduler.step()
 
-                # Evaluate model (NOTE: no parallelism here)
+                # --- Periodic validation-loss evaluation (rank 0 only, no DDP) ---
                 if global_rank ==0 and (step % training_params.loss_eval_frequency == 0 or first_loop_after_reloading or step == training_params.n_steps - 1):
                     with torch.set_grad_enabled(False):
+                        # Unwrap the DDP module so we evaluate the bare model.
                         transformer_for_eval = transformer.module if isinstance(transformer, nn.parallel.DistributedDataParallel) else transformer
                         transformer_for_eval.eval()
                         # sample and transform polytopes as for the training batches
@@ -248,6 +276,9 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
                     torch.cuda.synchronize(torch.cuda.current_device())
                     dist.barrier()
 
+                # --- Periodic FRST-generation monitoring ---
+                # Actually sample triangulations and save them so generation quality
+                # (not just loss) can be tracked over training. Runs on every rank.
                 if  (step % training_params.frst_gen_eval_frequency == 0 and step>0) or first_loop_after_reloading or step == training_params.n_steps - 1:
                     with torch.set_grad_enabled(False):
                         transformer_for_monitoring = transformer.module if isinstance(transformer, nn.parallel.DistributedDataParallel) else transformer
@@ -256,6 +287,8 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
                         if global_rank == 0 :
                             print("Starting monitoring FRST generation")
                             print(f"Generating triangulations ({training_params.N_polys_monitoring} polytopes, {training_params.numOfTs_per_poly} triangulations per polytope)")
+                        # Build the set of (poly-sampling, permutation) modes to evaluate
+                        # from the boolean config flags, then run every combination.
                         sampling_modes = (["uniform"] if training_params.sample_polys_uniformly_for_evaluation else []) + \
                                               (["proportional"] if training_params.sample_polys_wrt_number_of_triangs_for_evaluation else [])
                         permutation_modes = (["perm_once"] if training_params.permute_evaluation_polys_once else []) + \
@@ -263,6 +296,7 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
                         for sampling_and_permutation_mode in product(sampling_modes, permutation_modes):
                             if global_rank == 0:
                                 print(f"Sampling and permutation mode: {sampling_and_permutation_mode}")
+                            # Each rank handles a 1/world_size share of the monitoring polytopes.
                             polys_monitoring, poly_masks_monitoring = get_np_input_polytopes_and_masks_from_file(
                                 job_params.polys_file_test, training_params.n_vertices, training_params.N_polys_monitoring//world_size, unique_sampling=(sampling_and_permutation_mode[0] == "uniform"), permutation=True, verbose=False
                             )
@@ -279,7 +313,8 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
                         if global_rank == 0:
                             print(f"Monitoring time: {np.round((time.time()-monitoring_start_time)/60, decimals=2)} mn")
 
-                # Save and stop the training if it exceeds the maximum time - 5h
+                # Trigger a checkpoint shortly (5h) before the job's time limit so the
+                # run can be relaunched and resumed cleanly.
                 scheduled_end_of_training =  (job_params.continued_training and (time.time() - starting_time)/3600.0 > job_params.max_time - 5)
                 if global_rank ==0 and (scheduled_end_of_training or (step % training_params.checkpoint_frequency == 0 and step>0) or step == training_params.n_steps - 1):
                     if step == training_params.n_steps - 1:
@@ -287,6 +322,9 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
                     if scheduled_end_of_training:
                         print("The maximum time limit is about to be reached")
                     print(f'Saving the model at Checkpoints/{job_params.folder_name}/{job_params.exp_name}/chkpt-{step}')
+                    # Hyperparameters stored alongside the weights so the model can be
+                    # rebuilt at load time. FROZEN CONTRACT: keys/values/order must not
+                    # change or existing checkpoints become unloadable.
                     hyperparams = {
                         'tgt_vocab_size': encoding_params.tgt_vocab_size,
                         'd_model_src': model_params.d_model_src,
@@ -303,7 +341,8 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
                         'lr': training_params.lr
                     }
                     transformer_for_saving = transformer.module if isinstance(transformer, nn.parallel.DistributedDataParallel) else transformer
-                    # Save the model
+                    # Save model/optimizer/scheduler state plus loss histories and the
+                    # step reached. FROZEN CONTRACT: do not alter keys/values/order.
                     torch.save({
                         'model_state_dict': transformer_for_saving.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
@@ -317,6 +356,7 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
                 if parallelism:
                     torch.cuda.synchronize(torch.cuda.current_device())
                     dist.barrier()
+                # Exit once the target step or the scheduled time limit is reached.
                 if scheduled_end_of_training or step == training_params.n_steps - 1:
                     if global_rank ==0:
                         print("Stopping the training")
@@ -325,6 +365,7 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
                     return
                 if first_loop_after_reloading:
                     first_loop_after_reloading = False
+                # Count an optimizer step (one effective batch) as one training step.
                 if sub_step % training_params.grad_acc_period == 0:
                     step += 1
 
@@ -338,6 +379,8 @@ if __name__ == "__main__":
     args = parse_arguments()
     gpus_per_node = torch.cuda.device_count()
     world_size = gpus_per_node if gpus_per_node > 0 else 1
+    # Spawn one training process per GPU when multiple are present; otherwise run
+    # the training function directly in this process.
     if world_size > 1:
         mp.spawn(train, args=(world_size, 0, world_size, args[0], args[1], args[2], args[3]), nprocs=gpus_per_node, join=True)
     else:

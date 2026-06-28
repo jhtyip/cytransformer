@@ -1,6 +1,17 @@
+"""
+Load a trained CYTransformer checkpoint and generate triangulations for a set of
+polytopes, saving the polytopes, masks and sampled triangulations to .npy files.
+
+Supports multi-GPU runs: every rank samples the *same* polytopes but draws its
+own triangulations (seeds differ per rank), and rank 0 merges the per-rank
+outputs at the end.
+"""
+
 import torch
 import sys
 import os
+# Generation over many polytopes can be slow; raise the NCCL collective timeout
+# so the cross-rank barriers do not abort on long-running ranks.
 os.environ["NCCL_TIMEOUT"] = "36000"
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import numpy as np
@@ -33,6 +44,7 @@ def setup(global_rank, world_size):
     )
 
 def set_seeds(base_seed, global_rank):
+    # Offset by rank so different ranks sample different triangulations.
     seed = base_seed + global_rank
     np.random.seed(seed)
     random.seed(seed)
@@ -55,7 +67,8 @@ def generate_triangs_from_checkpoint(local_rank:int,
                                      unique_polytope_sampling = True
                                      ):
 
-    """
+    """Generate triangulations from a checkpoint and save them to disk.
+
     When parallelized, all ranks sample the same polytopes, then independently generate guesses
 
     """
@@ -68,10 +81,12 @@ def generate_triangs_from_checkpoint(local_rank:int,
     # sleep 5s to avoid overlapping with the previous job
     time.sleep(5)
     if parallelism:
+        # Multi-GPU: join the process group and pin this process to its device.
         setup(global_rank, world_size)
         torch.cuda.set_device(local_rank)  # Set the current device for this process
         dist.barrier(device_ids=[torch.cuda.current_device()])
     else:
+        # Single-process: just report the SLURM job id if running under SLURM.
         slurm_job_id = os.environ.get("SLURM_JOB_ID")
         if slurm_job_id is not None:
             print(f"SLURM Job ID: {slurm_job_id}")
@@ -89,10 +104,11 @@ def generate_triangs_from_checkpoint(local_rank:int,
 
     if global_rank == 0:
         print(f"Random seed {seed}")
+    # Use rank 0's seed on every rank here so all ranks select the same polytopes.
     set_seeds(seed, 0) # same seed to select the polytopes for all ranks
 
 
-
+    # Load the checkpoint and rebuild the model/encoding config it was saved with.
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model_params = model_params_from_checkpoint(checkpoint)
     encoding_params = encoding_params_from_checkpoint(checkpoint)
@@ -110,6 +126,7 @@ def generate_triangs_from_checkpoint(local_rank:int,
     transformer.load_state_dict(checkpoint['model_state_dict'])
     transformer.eval()
 
+    # Now diverge the seeds per rank so each rank samples different triangulations.
     if global_rank == 0:
         print("Changing the random seeds across ranks")
     set_seeds(seed, global_rank)
@@ -120,11 +137,13 @@ def generate_triangs_from_checkpoint(local_rank:int,
 
     with torch.set_grad_enabled(False):
         transformer.eval()
+        # Split the requested triangulations-per-poly evenly across ranks.
         num_of_triangs_per_poly_for_this_rank = num_of_triangs_per_poly // world_size
         if global_rank == 0:
             print(f"Rank {global_rank}: generating triangulations ({num_of_polys} polytopes, {num_of_triangs_per_poly_for_this_rank} triangulations per polytope)")
         current_time = time.time()
         triangs = []
+        # Process polytopes in blocks of 50 to keep memory bounded.
         for i in range(0, num_of_polys, 50):
             if verbose:
                 print(f"Starting processing of polytope {i} - time elapsed: {time.time() - current_time}")
@@ -139,6 +158,8 @@ def generate_triangs_from_checkpoint(local_rank:int,
         dir_path = os.path.dirname(save_results_file_name)
         os.makedirs(dir_path, exist_ok=True)
         if parallelism:
+            # Each rank writes its own triangulations; the (shared) polys/masks are
+            # saved once by rank 0.
             if global_rank==0:
                 print(f"Rank {global_rank}: saving results in {save_results_file_name}_rank_{global_rank}")
                 np.save(save_results_file_name + "_polys_monitoring.npy", polys)
@@ -153,6 +174,8 @@ def generate_triangs_from_checkpoint(local_rank:int,
     if parallelism:
         torch.cuda.synchronize(torch.cuda.current_device())
         dist.barrier()
+    # Rank 0 concatenates every rank's triangulations (along the per-poly axis) into
+    # a single combined output file.
     if parallelism and global_rank == 0:
         print("Merging the results")
         polys_full = np.load(save_results_file_name+f"_polys_monitoring.npy" )
