@@ -58,18 +58,10 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
     if global_rank == 0:
         print(f"Process started with global rank: {global_rank}")
     parallelism = world_size > 1
-    # sleep 5s to avoid overlapping with the previous job
-    time.sleep(5)
     if parallelism:
         setup(global_rank, world_size)
         torch.cuda.set_device(local_rank)  # Set the current device for this process
         dist.barrier(device_ids=[torch.cuda.current_device()])
-    else:
-        slurm_job_id = os.environ.get("SLURM_JOB_ID")
-        if slurm_job_id is not None:
-            print(f"SLURM Job ID: {slurm_job_id}")
-        else:
-            print("SLURM_JOB_ID is not set.")
 
     assert training_params.N_polys_monitoring % world_size == 0, "N_polys_monitoring should be divisible by the number of GPUs"
 
@@ -77,18 +69,10 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
     # Used to stop the training min(5h, job_params.max_time/10) before job_params.max_time and to launch it again from a checkpoint
     starting_time = time.time()
 
-    # Get the SLURM task ID
-    task_id = os.environ.get('SLURM_ARRAY_TASK_ID', None)
-
     if global_rank == 0:
         print("\n\n------")
         print("Start of the experiment")
         if verbose:
-            if task_id is not None:
-                print(f"Current SLURM task ID: {task_id}")
-            else:
-                print("SLURM_ARRAY_TASK_ID is not set.")
-
             print("\n------")
             print("Model parameters:")
             model_params.display()
@@ -350,16 +334,11 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
 
 
 if __name__ == "__main__":
+    # Direct CLI entry (legacy). Preferred entrypoint: `python -m cyt.train --config ...`
     args = parse_arguments()
     gpus_per_node = torch.cuda.device_count()
-    node_rank = int(os.environ.get("SLURM_NODEID", 0)) if "SLURM_NODEID" in os.environ else 0
-    num_nodes = int(os.environ.get("SLURM_JOB_NUM_NODES", 1)) if "SLURM_JOB_NUM_NODES" in os.environ else 1
-    world_size = gpus_per_node * num_nodes
-    print(f"Node rank: {node_rank}")
-    print(f"Total number of GPUs: {world_size}")
-    print(f"Total number of nodes: {num_nodes}")
+    world_size = gpus_per_node if gpus_per_node > 0 else 1
     if world_size > 1:
-        print("Using multiple GPUs")
-        mp.spawn(train, args=(world_size, node_rank, gpus_per_node, args[0], args[1], args[2], args[3]), nprocs=gpus_per_node, join=True)
+        mp.spawn(train, args=(world_size, 0, world_size, args[0], args[1], args[2], args[3]), nprocs=gpus_per_node, join=True)
     else:
-        train(0, world_size,node_rank, gpus_per_node, args[0], args[1], args[2], args[3])
+        train(0, 1, 0, 1, args[0], args[1], args[2], args[3])
