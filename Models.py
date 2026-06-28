@@ -1,10 +1,19 @@
+"""
+CYTransformer model: a standard encoder-decoder Transformer (Vaswani et al., 2017).
+
+The encoder reads a polytope (its resolved vertices as 4D integer vectors); the
+decoder autoregressively emits a triangulation as a sequence of simplex tokens.
+
+Frozen contract: the module/attribute names here define the saved ``state_dict``
+keys, so they must not be renamed or existing checkpoints will fail to load.
+"""
+
 import numpy as np
 import math
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data as data
-
 
 
 class MultiHeadAttention(nn.Module):
@@ -49,7 +58,7 @@ class MultiHeadAttention(nn.Module):
         return output
 
 
-# MLP for encoding polytope vertex coordinates
+# MLP that embeds a 4D polytope vertex coordinate into the model dimension.
 class EncoderInputEmbedding(nn.Module):
     def __init__(self, d_model_src, d_ff_enem, d_model):
         super(EncoderInputEmbedding, self).__init__()
@@ -124,6 +133,7 @@ class DecoderLayer(nn.Module):
 
 
 class Transformer(nn.Module):
+    # d_ff / d_ff_enem == -1 default to the conventional 4 * d_model width.
     def __init__(self, d_model_src, d_model_tgt, d_model, tgt_vocab_size, num_heads, num_layers, d_ff_enem, d_ff, max_seq_length_src, max_seq_length_tgt, dropout, device, padding_idx = 128):
         super(Transformer, self).__init__()
         self.padding_idx = padding_idx
@@ -148,6 +158,7 @@ class Transformer(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def generate_tgt_mask(self, tgt):
+        # Decoder mask hides padding tokens and future positions (causal).
         tgt_mask = (tgt != self.padding_idx).unsqueeze(1).unsqueeze(3)  # "128" or "212" or...
         seq_length = tgt.size(1)
         nopeak_mask = (1 - torch.triu(torch.ones(1, seq_length, seq_length, device=self.device), diagonal=1)).bool()
