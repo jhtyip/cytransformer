@@ -20,7 +20,7 @@ def main():
     ap.add_argument("--config", required=True, help="Path to a training YAML config.")
     args = ap.parse_args()
 
-    model_params, encoding_params, training_params, job_params, _rl = load_train_config(args.config)
+    model_params, encoding_params, training_params, job_params = load_train_config(args.config)
 
     use_gpu = bool(getattr(job_params, "Gpu", True)) and torch.cuda.is_available()
     world_size = torch.cuda.device_count() if use_gpu else 1
