@@ -68,6 +68,7 @@ def main():
                 reg_fp += 1
             if (not d["regular"]) and cy_reg:
                 reg_fn += 1
+        print(f"[{i+1}/{N}] compared={total} skipped={errors} | FRST fp={frst_fp} fn={frst_fn} | reg fp={reg_fp} fn={reg_fn}", flush=True)
 
     print(f"compared: {total}   (CYTools 'error'/invalid skipped: {errors})")
     print(f"FRST   : false positives {frst_fp}  (must be 0) | false negatives {frst_fn}")

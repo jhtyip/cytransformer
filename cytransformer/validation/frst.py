@@ -54,7 +54,12 @@ def is_frst(poly, poly_mask, tokens_triang, padding_idx, return_detail=False):
         total_vol = ConvexHull(points).volume
         coord_simplices = [points[list(s)] for s in simplices]
         valid = check_valid_triangulation(coord_simplices, total_vol)
+    except (ImportError, ModuleNotFoundError):
+        # A missing dependency (e.g. pycddlib) must surface loudly, not be
+        # silently turned into "every candidate is non-FRST".
+        raise
     except Exception:
+        # Genuine geometry failures (degenerate simplex, etc.) -> not valid.
         valid = False
 
     regular = is_regular(points, simplices)
