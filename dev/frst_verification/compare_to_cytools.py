@@ -19,7 +19,7 @@ import argparse
 import numpy as np
 
 from cytransformer.validation.frst import is_frst
-from cytransformer.validation.check_frst import is_triangulation_FRST
+from check_frst import is_triangulation_FRST   # CYTools ground truth (kept in dev/, not in the core package)
 
 CY_REGULAR = {"FRST", "RST"}
 
