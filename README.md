@@ -1,124 +1,113 @@
 # CYTransformer
 
 A transformer that generates **Fine, Regular, Star Triangulations (FRSTs)** of 4‑dimensional
-reflexive polytopes — the combinatorial data behind smooth Calabi‑Yau threefolds in toric
-varieties. CYTransformer learns to sample FRSTs efficiently and *representatively* (unbiasedly)
-across polytope sizes, and can self‑improve by retraining on its own validated output.
+reflexive polytopes — the combinatorial data behind smooth Calabi‑Yau threefolds — and verifies
+each generated triangulation is a genuine FRST **in real time, without CYTools**.
 
-This is the reference implementation for the paper
-**“Transforming Calabi‑Yau Constructions: Generating New Calabi‑Yau Manifolds with Transformers”**
-([arXiv:2507.03732](https://arxiv.org/abs/2507.03732)), and the first software component of
-**AICY** — *AI‑enabled living Calabi‑Yau repositories* (https://aicy.physics.wisc.edu).
+Reference implementation for *"Transforming Calabi‑Yau Constructions: Generating New Calabi‑Yau
+Manifolds with Transformers"* ([arXiv:2507.03732](https://arxiv.org/abs/2507.03732)), and the first
+software component of **AICY** (https://aicy.physics.wisc.edu).
+
+`cyt` is **self‑contained**: it trains on a dataset you give it, or generates FRSTs from polytopes you
+give it. It does **not** generate the data — producing datasets / fetching polytopes is an optional
+**extra** (the only thing that uses CYTools).
 
 ---
-
-## What it does
-
-- **Encoder–decoder transformer**: the encoder reads a polytope (its resolved vertices as 4D
-  integer vectors); the decoder autoregressively emits a triangulation as a sequence of simplex
-  tokens.
-- Trained with cross‑entropy on FRSTs, with vertex‑permutation and simplex‑shuffling augmentation.
-- Generates many distinct candidate triangulations per polytope; candidates can optionally be
-  verified as genuine FRSTs.
-
-Polytope configurations are labelled by `(h^{1,1}, N_vert)` — e.g. `(5, 9+1)` means a polytope with
-9 non‑origin resolved vertices (plus the origin).
 
 ## Install
 
 ```bash
-pip install -e .          # installs the package + the cyt-prepare / cyt-train / cyt-infer commands
-# or, without installing:  pip install -r requirements.txt
+git clone https://github.com/jhtyip/cytransformer
+cd cytransformer
+pip install -e .          # core only (PyTorch, scipy, pycddlib, ...). No CYTools needed.
 ```
+This gives you three commands: `cyt-prepare`, `cyt-train`, `cyt-infer`.
 
-That is enough to **train** and **generate** — no CYTools needed. CYTools (and `pycddlib`) are
-**optional**, required only to (a) generate brand‑new triangulation data from the Kreuzer–Skarke
-database, or (b) *validate* that generated candidates are genuine FRSTs:
+## Use case 1 — Generate FRSTs (you have a weights file)
+
+You need: a **weights file** (e.g. `model.pt`) and an **input polytope file**. A small example,
+`examples/polytopes.json`, ships with the repo.
 
 ```bash
-pip install -e ".[validation]"   # plus a CYTools install: https://cytools.liammcallister.com
+cyt-infer --checkpoint model.pt --polys examples/polytopes.json --num-per-poly 100
 ```
+What happens: the model generates candidate triangulations for each polytope, and **each one is
+verified as a real FRST on the spot**, printing e.g.
 
-> Tip: pin `torch` to a build matching your platform/CUDA. CPU works out of the box; for GPU use the
-> appropriate CUDA wheel.
+```
+FRST validation: 87/100 candidates are FRSTs (87.0%)
+```
+plus a saved `*_is_frst.npy` mask flagging which candidates are genuine FRSTs. (Pass `--no-validate`
+to skip the check.) The encoding is read from the checkpoint, so you never have to specify it.
 
-## Quickstart
+## Use case 2 — Train your own model
 
-The three steps below run on **CPU, without CYTools**, using the small example configs in `configs/`.
+You need a **dataset**: a polytopes file + a triangulations file (see *Data format* below). A small
+example ships in `examples/`.
 
 ```bash
-# 1. Prepare data: split a raw (polytopes, triangulations) pair into aligned train/val/test sets
-cyt-prepare --config configs/prepare_9+1.yaml
+# 1. split the dataset into train/val/test
+cyt-prepare --polys examples/dataset_polys.json --triangs examples/dataset_triangs.json \
+            --n-vertices 9 --n-train 30 --n-val 5 --n-test 5 --out data/
 
-# 2. Train
-cyt-train --config configs/train_9+1.yaml
-
-# 3. Generate FRST candidates from the trained checkpoint
-cyt-infer --config configs/infer_9+1.yaml
+# 2. train (edit configs/train.yaml to point at data/ and pick model size / steps)
+cyt-train --config configs/train.yaml
 ```
+During training it prints the **live FRST generation rate** every monitoring step, so you can watch the
+model learn to produce valid FRSTs. To continue from existing weights, set `continued_training: true`
+in the config with a checkpoint in the run folder. (A paper‑scale run uses `d_model=512`, 16 heads, 16
+layers, hundreds of thousands of steps, on a GPU — set `Gpu: true`.)
 
-(Didn't `pip install`? Use the module form, e.g. `python -m cytransformer.cli.train --config configs/train_9+1.yaml`.)
+Both `cyt-infer` and `cyt-prepare` also accept a `--config <file>.yaml` instead of flags; flags
+override the config.
 
-The example configs are sized for a quick smoke test. For the **paper‑scale model**, use
-`d_model=512, num_heads=16, num_layers=16`, the `exponential` scheduler, `n_steps` in the hundreds of
-thousands, a full data split, and a GPU (`job.Gpu: true`).
+## Optional extras (the only part that needs CYTools)
 
-### Data formats
-- **Raw** files (e.g. `9+1_polys_0_4999.json`, `9+1_triangs_0_4999.json`) are lists of records keyed
-  by `POLYID` (polytopes carry `DRESVERTS`, triangulations carry `TRIANG`).
-- `cyt.prepare_data` pairs each triangulation with its polytope and writes **processed**
-  `[POLYID, DRESVERTS]` / `[POLYID, TRIANG]` lists, aligned 1:1, split by polytope group.
-- **Training and inference consume the processed format** (not raw). Point `infer`’s `polys_file` at a
-  processed polytopes file.
-
-## Using a pretrained checkpoint
-
-Drop a checkpoint at the path your inference config points to and run `cyt.infer`. The encoding
-(`n_vertices`, vocabulary, sequence lengths) is read **from the checkpoint**, so it always matches how
-the model was trained — do not override it.
-
-## Configuration
-
-Configs are YAML and map directly onto the model/training/job parameters (see `config.py`). A training
-config has `model:`, `training:`, and `job:` sections; an inference config is a flat file pointing at a
-`checkpoint_path` and a `polys_file`. See the files in `configs/` for annotated examples.
-
-## Running on a GPU / RunPod
-
-Set `job.Gpu: true` in the training config. With one GPU it trains single‑process; with several
-visible GPUs it uses PyTorch DistributedDataParallel automatically.
-
-## The frozen model contract
-
-To keep checkpoints interchangeable across versions (and to load original weights), the following are a
-**frozen contract — do not edit**:
-- `cytransformer/models.py` (architecture / `state_dict` keys),
-- the checkpoint dict schema saved in `cytransformer/train.py` and read by
-  `cytransformer.args.model_params_from_checkpoint` / `encoding_params_from_checkpoint`,
-- the encoding/tokenization (`cytransformer.args.encoding_parameters`, the simplex vocabulary in
-  `cytransformer/dataset.py`, and the translation helpers in `cytransformer/utilities.py`).
-
-`tests/test_checkpoint_contract.py` guards this: it proves a checkpoint round‑trips through the loader
-bit‑for‑bit (run it after any change). Point it at a real checkpoint to verify that file loads:
+These live in `generation/` and require a separate **CYTools** install
+(https://cytools.liammcallister.com). The core above needs none of it.
 
 ```bash
-python tests/test_checkpoint_contract.py [path/to/checkpoint]
+# Generate FRSTs for ANY Kreuzer-Skarke polytope, right away:
+python generation/fetch_polytopes.py --h11 5 --n 100 --out polys.json
+cyt-infer --checkpoint model.pt --polys polys.json
+
+# Build a training dataset from scratch:
+python generation/make_dataset.py --n_vertices 9 --upper_bound 2000 \
+    --folder data_raw --polys_file data_raw/polys.json --triangs_file data_raw/triangs.json
 ```
+
+## Data format
+
+Plain JSON the core reads with no CYTools:
+- **Polytopes:** a list of `[POLYID, DRESVERTS]`, where `DRESVERTS` is the string
+  `"{{x,y,z,w},{...},...}"` of resolved vertices.
+- **Triangulations:** a list of `[POLYID, TRIANG]`, where `TRIANG` is `"{{i,j,k,l,m},...}"` of simplex
+  vertex indices.
+
+## How FRST verification works (no CYTools)
+
+`cytransformer/validation/` checks **fine + star** (trivial), **valid** tiling (`check_valid`, via
+`pycddlib`), and **regular** (`regularity.is_regular`, a small LP — does a height function exist whose
+lower hull is this triangulation). Combined in `is_frst`. This was cross‑checked against CYTools on
+**6,901 labeled triangulations with 0 false positives and 0 false negatives**; the harness lives in
+`dev/frst_verification/`.
 
 ## Repository layout
 
 ```
-cytransformer/               # the package
-├── models.py args.py dataset.py utilities.py   # frozen core (architecture + encoding)
-├── inference.py train.py data_generation.py    # core training / generation
-├── config.py                                   # YAML -> params loader
-├── cli/                                         # one-command entrypoints: prepare_data, train, infer
-└── validation/                                 # optional, needs CYTools: check_frst, check_valid,
-                                                 #   monitoring, generate_triangs_from_checkpoint, rl
-configs/                     # example YAML configs
-tests/                       # checkpoint-contract safety net
-pyproject.toml  LICENSE  README.md  requirements.txt
+cytransformer/        # the self-contained core (no CYTools)
+  models  args  dataset  utilities  inference  train  config  data_prep
+  cli/         prepare_data  train  infer
+  validation/  frst  regularity  check_valid       # CYTools-free FRST verifier
+generation/           # OPTIONAL extras (need CYTools): make_dataset, fetch_polytopes
+configs/  examples/  tests/  dev/
 ```
+
+## The frozen model contract
+
+To keep checkpoints loadable across versions, do **not** edit `cytransformer/models.py`, the checkpoint
+schema in `train.py`, or the encoding (`args.encoding_parameters`, `dataset.py`, `utilities.py`
+translation helpers). `tests/test_checkpoint_contract.py` guards this.
 
 ## Citation
 

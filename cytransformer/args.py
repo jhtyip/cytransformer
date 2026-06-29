@@ -20,7 +20,7 @@ import math
 import json
 
 from cytransformer.models import Transformer
-from cytransformer.data_generation import split_data
+from cytransformer.data_prep import split_data
 from torch.utils.data import DataLoader, DistributedSampler
 from cytransformer.dataset import Polys_triangs_dataset
 from torch import Generator
@@ -84,6 +84,9 @@ class TrainingParams(Params):
     # The two options below are NOT mutually exclusive
     sample_polys_uniformly_for_evaluation: bool = True
     sample_polys_wrt_number_of_triangs_for_evaluation: bool = True
+    # Run the CYTools-free FRST verifier on the generated monitoring triangulations
+    # and log the FRST rate live (default on; needs pycddlib). Set False to skip.
+    validate_frst_during_training: bool = True
 
     lr: float = 0.00005
     scheduler: str = "None"
@@ -94,19 +97,6 @@ class TrainingParams(Params):
     random_seed: int = 43
     # Deprecated for now
     resume_from_checkpoint: bool = False
-
-class RLParams(Params):
-    """Settings for the self-improvement (reinforcement-learning) loop that
-    periodically generates fresh triangulations and retrains on them."""
-    rl_data_folder: str = "RL_data/RL_debug"
-    n_iterations: int = 5
-    n_polys_for_guesses: int = 1000
-    n_triangs_per_poly_for_guesses: int = 100
-    no_rl: bool = False
-    initial_number_of_triangs_per_poly: int = 5
-    permute_polys_for_new_data_generation: bool = False
-    permute_polys_for_each_triang_for_new_data_generation: bool = False
-    sample_polys_uniformly_for_new_data_generation: bool = False
 
 
 
@@ -278,7 +268,7 @@ def parse_arguments():
 
     Boolean flags are passed as the strings 'True'/'False' and converted below;
     the parsed values are then distributed into ModelParams, EncodingParams,
-    TrainingParams, JobParams and RLParams, which are returned as a tuple.
+    TrainingParams and JobParams, which are returned as a tuple.
     """
     parser = argparse.ArgumentParser(description="Parse training parameters.")
 
@@ -334,17 +324,6 @@ def parse_arguments():
     parser.add_argument("--num_cpus", type=int, default=10, help="Number of CPU cores to use for data loading.")
     parser.add_argument("--Gpu", type=str, default='True', help="Use GPU for training.")
 
-    # RLParams (only used in RL training)
-    parser.add_argument("--rl_data_folder", type=str, default="RL_data/RL_debug", help="Folder for RL data.")
-    parser.add_argument("--n_iterations", type=int, default=5, help="Number of RL iterations.")
-    parser.add_argument("--n_polys_for_guesses", type=int, default=1000, help="Number of polytopes when generating new data.")
-    parser.add_argument("--n_triangs_per_poly_for_guesses", type=int, default=100, help="Number of triangulations per polytope when generating new data.")
-    parser.add_argument("--no_rl", type=str, default='False', help="Disable RL training.")
-    parser.add_argument("--initial_number_of_triangs_per_poly", type=int, default=5, help="Initial number of triangulations per polytope for RL training.")
-    parser.add_argument("--permute_polys_for_new_data_generation", type=str, default='False', help="Apply a permutation to the polytope when generating new training data")
-    parser.add_argument("--permute_polys_for_each_triang_for_new_data_generation", type=str, default='True', help="Apply a different permutation to the polytope for each triangulation when generating new training data")
-    parser.add_argument("--sample_polys_uniformly_for_new_data_generation", type=str, default='True', help="Sample polytopes uniformly when generating new training data.")
-
     args = parser.parse_args()
 
     # Convert the string-encoded boolean flags into real booleans.
@@ -358,10 +337,6 @@ def parse_arguments():
     args.permute_evaluation_polys_once = args.permute_evaluation_polys_once.lower() == 'true'
     args.sample_polys_uniformly_for_evaluation = args.sample_polys_uniformly_for_evaluation.lower() == 'true'
     args.sample_polys_wrt_number_of_triangs_for_evaluation = args.sample_polys_wrt_number_of_triangs_for_evaluation.lower() == 'true'
-    args.no_rl = args.no_rl.lower() == 'true'
-    args.permute_polys_for_new_data_generation = args.permute_polys_for_new_data_generation.lower() == 'true'
-    args.permute_polys_for_each_triang_for_new_data_generation = args.permute_polys_for_each_triang_for_new_data_generation.lower() == 'true'
-    args.sample_polys_uniformly_for_new_data_generation = args.sample_polys_uniformly_for_new_data_generation.lower() == 'true'
 
     # Populate parameter objects
     model_params = ModelParams()
@@ -418,18 +393,7 @@ def parse_arguments():
     job_params.num_cpus = args.num_cpus
     job_params.Gpu = args.Gpu
 
-    RL_params = RLParams()
-    RL_params.rl_data_folder = args.rl_data_folder
-    RL_params.n_iterations = args.n_iterations
-    RL_params.n_polys_for_guesses = args.n_polys_for_guesses
-    RL_params.n_triangs_per_poly_for_guesses = args.n_triangs_per_poly_for_guesses
-    RL_params.no_rl = args.no_rl
-    RL_params.initial_number_of_triangs_per_poly = args.initial_number_of_triangs_per_poly
-    RL_params.permute_polys_for_new_data_generation = args.permute_polys_for_new_data_generation
-    RL_params.permute_polys_for_each_triang_for_new_data_generation = args.permute_polys_for_each_triang_for_new_data_generation
-    RL_params.sample_polys_uniformly_for_new_data_generation = args.sample_polys_uniformly_for_new_data_generation
-
-    return model_params, encoding_params, training_params, job_params, RL_params
+    return model_params, encoding_params, training_params, job_params
 
 
 

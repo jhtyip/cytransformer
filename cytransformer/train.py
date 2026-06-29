@@ -309,6 +309,13 @@ def train(local_rank, world_size, node_rank, gpus_per_node, model_params: ModelP
                                 print(f"Saving the triangulations")
                             save_output(polys_monitoring, poly_masks_monitoring, toSave_Ts_new, saved_output_dir+f"/{sampling_and_permutation_mode[0]}_{sampling_and_permutation_mode[1]}/global_rank_{global_rank}-{step}")
 
+                            # Optional live FRST verification of the just-generated
+                            # triangulations (CYTools-free; needs scipy + pycddlib).
+                            if training_params.validate_frst_during_training and global_rank == 0:
+                                from cytransformer.validation.frst import frst_rate
+                                n_frst, n_total, rate = frst_rate(polys_monitoring, poly_masks_monitoring, toSave_Ts_new, encoding_params.padding_idx)
+                                print(f"FRST rate ({sampling_and_permutation_mode}): {n_frst}/{n_total} = {np.round(100*rate, 1)}%")
+
                         if global_rank == 0:
                             print(f"Monitoring time: {np.round((time.time()-monitoring_start_time)/60, decimals=2)} mn")
 

@@ -2,8 +2,8 @@
 Thin YAML -> existing-params loader.
 
 This intentionally does NOT introduce any new model/encoding semantics: it only
-populates the project's existing ModelParams / TrainingParams / JobParams /
-RLParams objects from a YAML file, and derives the EncodingParams through the
+populates the project's existing ModelParams / TrainingParams / JobParams
+objects from a YAML file, and derives the EncodingParams through the
 frozen `Args.encoding_parameters(n_vertices)` -- the single source of truth for
 tokenization. So configs replace the old wall of CLI flags without touching the
 frozen model contract.
@@ -15,7 +15,6 @@ from cytransformer.args import (
     ModelParams,
     TrainingParams,
     JobParams,
-    RLParams,
     encoding_parameters,
 )
 
@@ -33,7 +32,7 @@ def _apply(obj, section):
 
 
 def load_train_config(path):
-    """Return (model_params, encoding_params, training_params, job_params, rl_params)."""
+    """Return (model_params, encoding_params, training_params, job_params)."""
     with open(path) as f:
         cfg = yaml.safe_load(f) or {}
 
@@ -45,9 +44,8 @@ def load_train_config(path):
 
     training_params = _apply(TrainingParams(), cfg.get("training"))
     job_params = _apply(JobParams(), cfg.get("job"))
-    rl_params = _apply(RLParams(), cfg.get("rl"))
 
-    return model_params, encoding_params, training_params, job_params, rl_params
+    return model_params, encoding_params, training_params, job_params
 
 
 def load_infer_config(path):

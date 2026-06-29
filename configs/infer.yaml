@@ -1,0 +1,8 @@
+# Generate FRSTs from input polytopes (real-time FRST validation on by default).
+checkpoint_path: "model.pt"            # <- path to your trained weights
+polys_file: "examples/polytopes.json"
+num_of_polys: 5
+num_of_triangs_per_poly: 20
+gpu: false
+validate: true
+save_results_file: "results/infer"

@@ -30,3 +30,7 @@ Saved_outputs/*
 RL_data/*
 !.gitkeep
 Saved_outputs_to_share/*
+
+# example/runtime outputs
+data/
+results/

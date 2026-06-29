@@ -20,15 +20,15 @@ dependencies = [
     "numpy",
     "scipy",
     "torch",
+    "pycddlib",   # real-time FRST validity check
     "matplotlib",
     "ijson",
     "pyyaml",
 ]
 
-[project.optional-dependencies]
-# FRST validation / new-data generation also require a CYTools install
-# (see https://cytools.liammcallister.com).
-validation = ["pycddlib"]
+# Note: the OPTIONAL dataset-generation tools in generation/ additionally require a
+# CYTools install (https://cytools.liammcallister.com) — not pip-installable here.
+# The core (train / infer / validate) needs none of it.
 
 [project.urls]
 Homepage = "https://aicy.physics.wisc.edu"

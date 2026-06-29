@@ -1,0 +1,10 @@
+# Split the bundled example dataset (or your own) into train/val/test.
+polys_file: "examples/dataset_polys.json"
+triangs_file: "examples/dataset_triangs.json"
+n_vertices: 9
+n_train: [0, 30]
+n_val: [30, 35]
+n_test: [35, 40]
+out_dir: "data"
+randomize: true
+seed: 0
