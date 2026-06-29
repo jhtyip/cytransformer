@@ -20,7 +20,7 @@ import math
 import json
 
 from cytransformer.models import Transformer
-from cytransformer.data_generation import split_data
+from cytransformer.data_prep import split_data
 from torch.utils.data import DataLoader, DistributedSampler
 from cytransformer.dataset import Polys_triangs_dataset
 from torch import Generator

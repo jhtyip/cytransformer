@@ -103,7 +103,7 @@ class Polys_triangs_dataset(Dataset):
 
 if __name__ == "__main__":
     # Small manual smoke check of the dataset / dataloader.
-    from cytransformer.data_generation import split_data
+    from cytransformer.data_prep import split_data
     from torch.utils.data import DataLoader
     filepath_train_polys = 'Data/9+1/debug/9+1_polys_0_200_train.json'
     filepath_train_triangs = 'Data/9+1/debug/9+1_triangs_0_200_train.json'

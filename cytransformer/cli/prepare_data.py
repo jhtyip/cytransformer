@@ -14,7 +14,7 @@ import os
 
 import yaml
 
-from cytransformer.data_generation import split_data_into_three_files
+from cytransformer.data_prep import split_data_into_three_files
 
 
 def main():
