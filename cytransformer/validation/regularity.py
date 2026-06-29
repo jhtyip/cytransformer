@@ -1,6 +1,6 @@
 """
-Prototype: CYTools-free checks for a triangulation given as index simplices over
-a point set. The crux is `is_regular` (an LP); `is_fine`/`is_star` are trivial.
+CYTools-free geometric checks for a triangulation given as index simplices over a
+point set. The crux is `is_regular` (an LP); `is_fine`/`is_star` are trivial.
 
 A triangulation T of a point set is REGULAR iff there is a height vector w such
 that lifting each point p_i to (p_i, w_i) and taking the lower convex hull

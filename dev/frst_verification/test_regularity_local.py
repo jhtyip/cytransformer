@@ -11,7 +11,7 @@ with three cyclically-offset edge points.
 """
 import numpy as np
 from scipy.spatial import Delaunay
-from regularity import is_regular
+from cytransformer.validation.regularity import is_regular
 
 rng = np.random.default_rng(0)
 

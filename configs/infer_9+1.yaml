@@ -11,3 +11,4 @@ permutation: true
 permutation_for_each_triang: false
 gpu: false
 save_results_file: "Saved_outputs/9+1/smoke_infer/results"
+validate: false   # true -> verify candidates are FRSTs on the go (needs scipy + pycddlib)

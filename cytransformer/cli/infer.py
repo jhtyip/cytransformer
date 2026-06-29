@@ -62,6 +62,20 @@ def main():
         save_output(polys, masks, Ts, out)
         print(f"Saved results to {out}*")
 
+    # Optional on-the-go FRST verification (CYTools-free; needs scipy + pycddlib).
+    if bool(cfg.get("validate", False)):
+        import numpy as np
+        from cytransformer.validation.frst import is_frst
+        is_frst_mask = np.zeros(Ts.shape[:2], dtype=bool)   # (num_of_polys, num_of_triangs)
+        for i in range(len(polys)):
+            for k in range(Ts.shape[1]):
+                is_frst_mask[i, k] = is_frst(polys[i], masks[i], Ts[i, k], encoding_params.padding_idx)
+        n_frst, n_total = int(is_frst_mask.sum()), is_frst_mask.size
+        print(f"FRST validation: {n_frst}/{n_total} candidates are FRSTs ({np.round(100*n_frst/n_total, 1)}%)")
+        if out:
+            np.save(out + "_is_frst.npy", is_frst_mask)
+            print(f"Saved FRST mask to {out}_is_frst.npy")
+
     print(f"Done. polys={polys.shape}, triangulation tokens={Ts.shape}")
 
 

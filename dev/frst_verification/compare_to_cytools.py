@@ -18,7 +18,7 @@ Usage:
 import argparse
 import numpy as np
 
-from frst import is_frst
+from cytransformer.validation.frst import is_frst
 from cytransformer.validation.check_frst import is_triangulation_FRST
 
 CY_REGULAR = {"FRST", "RST"}

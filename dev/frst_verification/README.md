@@ -41,5 +41,12 @@ It prints agree/disagree counts and, crucially, the number of **false positives*
 (ours says regular, CYTools says not) — which must be **0** before we trust this
 as a CYTools-free verifier.
 
-Once it agrees with CYTools, we promote `regularity.py` into
-`cytransformer/validation/` and offer it as the default verifier (CYTools optional).
+The verifier now lives in the package: `cytransformer/validation/regularity.py`
+and `cytransformer/validation/frst.py` (`is_frst`). It is wired in **behind opt-in
+flags** (off by default):
+- training: `training.validate_frst_during_training: true` -> logs a live FRST rate
+  in the monitoring block;
+- inference: `validate: true` -> flags/saves which candidates are FRSTs.
+
+Once `compare_to_cytools.py` confirms zero false positives against CYTools, we can
+make it the default verifier and drop CYTools from the verification path entirely.

@@ -9,8 +9,7 @@ import os
 import sys
 import json
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from frst import is_frst
+from cytransformer.validation.frst import is_frst
 from cytransformer.dataset import Polys_triangs_dataset
 from cytransformer.args import encoding_parameters
 

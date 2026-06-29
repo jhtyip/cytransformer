@@ -14,15 +14,18 @@ convex hull of {origin} u {resolved vertices} via scipy, so nothing external is
 required beyond numpy / scipy / pycddlib.
 
 Inputs match the existing pipeline (cf. check_frst.is_triangulation_FRST):
-  poly        : (N_vert, 4) resolved-vertex coordinates (padded rows allowed)
-  poly_mask   : (N_vert,)   1 for real vertices
+  poly          : (N_vert, 4) resolved-vertex coordinates (padded rows allowed)
+  poly_mask     : (N_vert,)   1 for real vertices
   tokens_triang : the model token sequence for one triangulation
-  padding_idx : the encoding's padding index (128 for 9+1, 212 for 10+1, ...)
+  padding_idx   : the encoding's padding index (128 for 9+1, 212 for 10+1, ...)
+
+NOTE: this verifier is being validated against CYTools (see dev/frst_verification);
+until that cross-check passes it is opt-in, not the default.
 """
 import numpy as np
 from scipy.spatial import ConvexHull
 
-from regularity import is_regular, is_star, is_fine
+from cytransformer.validation.regularity import is_regular, is_star, is_fine
 from cytransformer.utilities import tokens_triang_to_vert_indices_wo_triang
 from cytransformer.validation.check_valid import check_valid_triangulation
 
@@ -56,3 +59,18 @@ def is_frst(poly, poly_mask, tokens_triang, padding_idx, return_detail=False):
 
     regular = is_regular(points, simplices)
     return result(fine, star, valid, regular)
+
+
+def frst_rate(polys, poly_masks, token_triangs, padding_idx):
+    """Count FRSTs among generated candidates.
+
+    polys: (P, N_vert, 4), poly_masks: (P, N_vert), token_triangs: (P, T, L).
+    Returns (n_frst, n_total, rate).
+    """
+    n_frst = n_total = 0
+    for i in range(len(polys)):
+        for k in range(token_triangs.shape[1]):
+            n_total += 1
+            if is_frst(polys[i], poly_masks[i], token_triangs[i, k], padding_idx):
+                n_frst += 1
+    return n_frst, n_total, (n_frst / n_total if n_total else 0.0)

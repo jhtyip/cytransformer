@@ -31,6 +31,7 @@ training:
   permute_evaluation_polys_for_each_triang: false
   sample_polys_uniformly_for_evaluation: true
   sample_polys_wrt_number_of_triangs_for_evaluation: false
+  validate_frst_during_training: false   # true -> log live FRST rate (needs scipy + pycddlib)
 
 job:
   folder_name: "9+1"
