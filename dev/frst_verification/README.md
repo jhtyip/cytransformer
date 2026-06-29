@@ -22,6 +22,11 @@ An FRST check decomposes into:
 - **Not yet validated against CYTools ground truth** (the false-positive
   direction: correctly *rejecting* genuinely non-regular triangulations). That is
   what `compare_to_cytools.py` is for — run it on the cluster.
+- `frst.py` assembles the four checks into a single **`is_frst()`** (no CYTools;
+  needs `scipy` + `pycddlib`). Locally it classifies **20/20 real FRSTs** as FRST
+  and rejects 15/15 random-garbage and a corrupted FRST (`test_is_frst_local.py`).
+  Still pending the CYTools ground-truth cross-check for the subtle false-positive
+  direction (valid+fine+star but non-regular triangulations).
 
 ## How to validate (on the cluster, where CYTools is installed)
 ```bash
