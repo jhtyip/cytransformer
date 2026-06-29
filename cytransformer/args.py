@@ -84,9 +84,9 @@ class TrainingParams(Params):
     # The two options below are NOT mutually exclusive
     sample_polys_uniformly_for_evaluation: bool = True
     sample_polys_wrt_number_of_triangs_for_evaluation: bool = True
-    # If True, run the CYTools-free FRST verifier on the generated monitoring
-    # triangulations and log the FRST rate live (needs scipy + pycddlib).
-    validate_frst_during_training: bool = False
+    # Run the CYTools-free FRST verifier on the generated monitoring triangulations
+    # and log the FRST rate live (default on; needs pycddlib). Set False to skip.
+    validate_frst_during_training: bool = True
 
     lr: float = 0.00005
     scheduler: str = "None"

@@ -1,13 +1,13 @@
 """
-One-command inference entrypoint: generate FRST candidate triangulations for
-polytopes using a trained checkpoint.
+Inference: generate candidate triangulations for input polytopes using trained
+weights, and verify each is a genuine FRST in real time.
 
-    python -m cyt.infer --config configs/infer_9+1.yaml
+  Simple:  cyt-infer --checkpoint model.pt --polys polytopes.json
+  Config:  cyt-infer --config configs/infer_9+1.yaml
 
-CYTools is NOT required: this only generates candidate token sequences. Checking
-whether a candidate is a genuine FRST is a separate, optional step (needs CYTools).
-The encoding (vocab, n_vertices, sequence lengths) is read from the checkpoint, so
-it always matches how the model was trained.
+No CYTools. FRST validation (CYTools-free) is ON by default; pass --no-validate to
+skip it. The encoding (vocab, n_vertices, sequence lengths) is read from the
+checkpoint, so it always matches how the model was trained.
 """
 import argparse
 import os
@@ -25,24 +25,42 @@ from cytransformer.inference import generate_triangulations
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Generate FRST candidates from a checkpoint.")
-    ap.add_argument("--config", required=True, help="Path to an inference YAML config.")
+    ap = argparse.ArgumentParser(description="Generate FRSTs from input polytopes (real-time FRST validation by default).")
+    ap.add_argument("--config", help="Optional YAML config; the flags below override it.")
+    ap.add_argument("--checkpoint", help="Path to the trained weights file.")
+    ap.add_argument("--polys", help="Input polytopes JSON ([POLYID, DRESVERTS] format).")
+    ap.add_argument("--num-of-polys", type=int, help="How many polytopes to use.")
+    ap.add_argument("--num-per-poly", type=int, help="Triangulations to generate per polytope.")
+    ap.add_argument("--out", help="Where to save results (path prefix).")
+    ap.add_argument("--no-validate", action="store_true", help="Skip real-time FRST validation.")
+    ap.add_argument("--gpu", action="store_true", help="Use the GPU if available.")
     args = ap.parse_args()
-    cfg = load_infer_config(args.config)
+
+    # Start from the config (if any), then let explicit flags override it.
+    cfg = load_infer_config(args.config) if args.config else {}
+    if args.checkpoint is not None:   cfg["checkpoint_path"] = args.checkpoint
+    if args.polys is not None:        cfg["polys_file"] = args.polys
+    if args.num_of_polys is not None: cfg["num_of_polys"] = args.num_of_polys
+    if args.num_per_poly is not None: cfg["num_of_triangs_per_poly"] = args.num_per_poly
+    if args.out is not None:          cfg["save_results_file"] = args.out
+    if args.no_validate:              cfg["validate"] = False
+    if args.gpu:                      cfg["gpu"] = True
+
+    if "checkpoint_path" not in cfg or "polys_file" not in cfg:
+        ap.error("provide --checkpoint and --polys (or a --config that sets them).")
 
     use_gpu = bool(cfg.get("gpu", True)) and torch.cuda.is_available()
     device = torch.device("cuda:0" if use_gpu else "cpu")
 
     ckpt = torch.load(cfg["checkpoint_path"], map_location=device, weights_only=False)
-    model_params = model_params_from_checkpoint(ckpt)      # FROZEN reader
+    model_params = model_params_from_checkpoint(ckpt)        # FROZEN reader
     encoding_params = encoding_params_from_checkpoint(ckpt)  # FROZEN reader
-    n_vertices = ckpt["n_vertices"]
 
     model = return_transformer(model_params, encoding_params, device).to(device).eval()
     model.load_state_dict(ckpt["model_state_dict"], strict=True)
 
     polys, masks = get_np_input_polytopes_and_masks_from_file(
-        cfg["polys_file"], n_vertices, int(cfg.get("num_of_polys", 10)),
+        cfg["polys_file"], ckpt["n_vertices"], int(cfg.get("num_of_polys", 10)),
         unique_sampling=bool(cfg.get("unique_polytope_sampling", True)),
         permutation=bool(cfg.get("permutation", True)),
         verbose=True,
@@ -62,8 +80,8 @@ def main():
         save_output(polys, masks, Ts, out)
         print(f"Saved results to {out}*")
 
-    # Optional on-the-go FRST verification (CYTools-free; needs scipy + pycddlib).
-    if bool(cfg.get("validate", False)):
+    # On-the-go FRST verification (CYTools-free; default on, needs pycddlib).
+    if bool(cfg.get("validate", True)):
         import numpy as np
         from cytransformer.validation.frst import is_frst
         is_frst_mask = np.zeros(Ts.shape[:2], dtype=bool)   # (num_of_polys, num_of_triangs)

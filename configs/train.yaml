@@ -1,0 +1,45 @@
+# Example training config (small + fast). First run:
+#   cyt-prepare --config configs/prepare.yaml
+# then:
+#   cyt-train --config configs/train.yaml
+# For a paper-scale model use d_model=512, num_heads=16, num_layers=16, n_steps~4e5, a GPU.
+model:
+  d_model: 64
+  num_heads: 4
+  num_layers: 2
+  d_ff: 256
+  d_ff_enem: 256
+  dropout: 0.1
+training:
+  n_vertices: 9
+  n_train: 30
+  batch_size: 8
+  grad_acc_period: 1
+  n_steps: 50
+  lr: 0.00005
+  scheduler: "None"
+  random_seed: 43
+  loss_eval_frequency: 10
+  frst_gen_eval_frequency: 1000000
+  checkpoint_frequency: 1000000
+  N_polys_monitoring: 2
+  numOfTs_per_poly: 2
+  permute_training_polys: true
+  triang_shuffling: true
+  permute_evaluation_polys_once: true
+  permute_evaluation_polys_for_each_triang: false
+  sample_polys_uniformly_for_evaluation: true
+  sample_polys_wrt_number_of_triangs_for_evaluation: false
+  validate_frst_during_training: true
+job:
+  folder_name: "example"
+  exp_name: "run"
+  continued_training: false
+  num_cpus: 1
+  Gpu: false
+  polys_file_train: "data/train_polys.json"
+  triangs_file_train: "data/train_triangs.json"
+  polys_file_val: "data/val_polys.json"
+  triangs_file_val: "data/val_triangs.json"
+  polys_file_test: "data/test_polys.json"
+  triangs_file_test: "data/test_triangs.json"
