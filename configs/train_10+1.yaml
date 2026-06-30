@@ -1,0 +1,44 @@
+# Train on the included h11=6 (10+1) dataset.
+#   cyt-train --config configs/train_10+1.yaml
+# This is the paper-scale model (~119M params) -> use a GPU (job.Gpu: true).
+# For a quick CPU sanity run, set small d_model/num_layers and n_steps.
+model:
+  d_model: 512
+  num_heads: 16
+  num_layers: 16
+  d_ff: 2048
+  d_ff_enem: 2048
+  dropout: 0.1
+training:
+  n_vertices: 10
+  n_train: 20000            # max polytopes to use (capped at what the dataset has)
+  batch_size: 100
+  grad_acc_period: 1
+  n_steps: 400000
+  lr: 0.00005
+  scheduler: "exponential"
+  random_seed: 43
+  loss_eval_frequency: 500
+  frst_gen_eval_frequency: 25000
+  checkpoint_frequency: 25000
+  N_polys_monitoring: 40
+  numOfTs_per_poly: 40
+  permute_training_polys: true
+  triang_shuffling: true
+  permute_evaluation_polys_once: true
+  permute_evaluation_polys_for_each_triang: false
+  sample_polys_uniformly_for_evaluation: true
+  sample_polys_wrt_number_of_triangs_for_evaluation: false
+  validate_frst_during_training: true   # live FRST rate
+job:
+  folder_name: "10+1"
+  exp_name: "run"
+  continued_training: false              # set true (with a checkpoint present) to resume/continue
+  num_cpus: 4
+  Gpu: true
+  polys_file_train: "datasets/10+1/10+1_polys_train.json"
+  triangs_file_train: "datasets/10+1/10+1_triangs_train.json"
+  polys_file_val: "datasets/10+1/10+1_polys_val.json"
+  triangs_file_val: "datasets/10+1/10+1_triangs_val.json"
+  polys_file_test: "datasets/10+1/10+1_polys_test.json"
+  triangs_file_test: "datasets/10+1/10+1_triangs_test.json"

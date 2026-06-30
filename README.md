@@ -2,15 +2,11 @@
 
 A transformer that generates **Fine, Regular, Star Triangulations (FRSTs)** of 4‑dimensional
 reflexive polytopes — the combinatorial data behind smooth Calabi‑Yau threefolds — and verifies
-each generated triangulation is a genuine FRST **in real time, without CYTools**.
+each generated triangulation is a genuine FRST in real time.
 
 Reference implementation for *"Transforming Calabi‑Yau Constructions: Generating New Calabi‑Yau
 Manifolds with Transformers"* ([arXiv:2507.03732](https://arxiv.org/abs/2507.03732)), and the first
 software component of **AICY** (https://aicy.physics.wisc.edu).
-
-`cyt` is **self‑contained**: it trains on a dataset you give it, or generates FRSTs from polytopes you
-give it. It does **not** generate the data — producing datasets / fetching polytopes is an optional
-**extra** (the only thing that uses CYTools).
 
 ---
 
@@ -19,87 +15,102 @@ give it. It does **not** generate the data — producing datasets / fetching pol
 ```bash
 git clone https://github.com/jhtyip/cytransformer
 cd cytransformer
-pip install -e .          # core only (PyTorch, scipy, pycddlib, ...). No CYTools needed.
+pip install -e .
 ```
 This gives you three commands: `cyt-prepare`, `cyt-train`, `cyt-infer`.
 
-## Use case 1 — Generate FRSTs (you have a weights file)
+> CYTools is **not** required to train or to generate/validate FRSTs. It is only needed for the
+> optional tools that *make* polytope data — see [CYTools extras](#cytools-extras-optional).
 
-You need: a **weights file** (e.g. `model.pt`) and an **input polytope file**. A small example,
+## Generate FRSTs (with a trained model)
+
+You need a **weights file** (e.g. `model.pt`) and an **input polytope file**. A small example,
 `examples/polytopes.json`, ships with the repo.
 
 ```bash
 cyt-infer --checkpoint model.pt --polys examples/polytopes.json --num-per-poly 100
 ```
-What happens: the model generates candidate triangulations for each polytope, and **each one is
-verified as a real FRST on the spot**, printing e.g.
-
+The model generates candidate triangulations for each polytope and verifies each one as a real FRST
+on the spot:
 ```
 FRST validation: 87/100 candidates are FRSTs (87.0%)
 ```
-plus a saved `*_is_frst.npy` mask flagging which candidates are genuine FRSTs. (Pass `--no-validate`
-to skip the check.) The encoding is read from the checkpoint, so you never have to specify it.
+It also saves a boolean `*_is_frst.npy` mask flagging which candidates are genuine FRSTs. The encoding
+is read from the checkpoint, so you never specify it. (Add `--no-validate` to skip the FRST check.)
 
-## Use case 2 — Train your own model
+## Train your own model
 
-You need a **dataset**: a polytopes file + a triangulations file (see *Data format* below). A small
-example ships in `examples/`.
+The repo ships ready‑to‑train datasets, already split into train/val/test:
+- **`datasets/9+1/`** — h11 = 5
+- **`datasets/10+1/`** — h11 = 6
 
+**1. Train** (a GPU is recommended):
 ```bash
-# 1. split the dataset into train/val/test
-cyt-prepare --polys examples/dataset_polys.json --triangs examples/dataset_triangs.json \
-            --n-vertices 9 --n-train 30 --n-val 5 --n-test 5 --out data/
-
-# 2. train (edit configs/train.yaml to point at data/ and pick model size / steps)
-cyt-train --config configs/train.yaml
+cyt-train --config configs/train_9+1.yaml      # h11 = 5   (or configs/train_10+1.yaml for h11 = 6)
 ```
-During training it prints the **live FRST generation rate** every monitoring step, so you can watch the
-model learn to produce valid FRSTs. To continue from existing weights, set `continued_training: true`
-in the config with a checkpoint in the run folder. (A paper‑scale run uses `d_model=512`, 16 heads, 16
-layers, hundreds of thousands of steps, on a GPU — set `Gpu: true`.)
+**2. Watch it learn.** The log shows train/val loss and, every monitoring step, the **live FRST
+generation rate** — the fraction of the model's generated triangulations that are genuine FRSTs.
+Checkpoints are written to `Checkpoints/<folder>/<exp>/chkpt-<step>`.
 
-Both `cyt-infer` and `cyt-prepare` also accept a `--config <file>.yaml` instead of flags; flags
-override the config.
+**3. Use the trained model:**
+```bash
+cyt-infer --checkpoint Checkpoints/9+1/run/chkpt-399999 --polys examples/polytopes.json
+```
 
-## Optional extras (the only part that needs CYTools)
+Notes:
+- The shipped configs are the **paper‑scale** model (~119M params: `d_model=512`, 16 heads, 16 layers,
+  ~400k steps) and want a **GPU**. For a quick CPU sanity run, lower `model.d_model`,
+  `model.num_layers` and `training.n_steps` in the config.
+- To **continue from a checkpoint**, set `job.continued_training: true` (resumes from the latest
+  checkpoint in the run folder).
+- To train on **your own** data, make split files with `cyt-prepare` and point the `job.*_file_*`
+  paths at them.
 
-These live in `generation/` and require a separate **CYTools** install
-(https://cytools.liammcallister.com). The core above needs none of it.
+`cyt-infer` and `cyt-prepare` also accept plain flags instead of a config (flags override the config):
+```bash
+cyt-prepare --polys my_polys.json --triangs my_triangs.json --n-vertices 9 \
+            --n-train 8000 --n-val 1000 --n-test 1000 --out data/
+```
+
+## CYTools extras (optional)
+
+The scripts in `generation/` produce polytope data, and require a **CYTools** install
+(https://cytools.liammcallister.com):
 
 ```bash
-# Generate FRSTs for ANY Kreuzer-Skarke polytope, right away:
+# Generate FRSTs for any Kreuzer-Skarke polytope: fetch polytopes, then run cyt-infer on them.
 python generation/fetch_polytopes.py --h11 5 --n 100 --out polys.json
 cyt-infer --checkpoint model.pt --polys polys.json
 
-# Build a training dataset from scratch:
+# Build a fresh training dataset.
 python generation/make_dataset.py --n_vertices 9 --upper_bound 2000 \
     --folder data_raw --polys_file data_raw/polys.json --triangs_file data_raw/triangs.json
 ```
 
 ## Data format
 
-Plain JSON the core reads with no CYTools:
-- **Polytopes:** a list of `[POLYID, DRESVERTS]`, where `DRESVERTS` is the string
-  `"{{x,y,z,w},{...},...}"` of resolved vertices.
+Plain JSON:
+- **Polytopes:** a list of `[POLYID, DRESVERTS]`, where `DRESVERTS` is `"{{x,y,z,w},{...},...}"` of
+  resolved vertices.
 - **Triangulations:** a list of `[POLYID, TRIANG]`, where `TRIANG` is `"{{i,j,k,l,m},...}"` of simplex
   vertex indices.
 
-## How FRST verification works (no CYTools)
+## FRST verification
 
-`cytransformer/validation/` checks **fine + star** (trivial), **valid** tiling (`check_valid`, via
-`pycddlib`), and **regular** (`regularity.is_regular`, a small LP — does a height function exist whose
-lower hull is this triangulation). Combined in `is_frst`. This was cross‑checked against CYTools on
-**6,901 labeled triangulations with 0 false positives and 0 false negatives**; the harness lives in
-`dev/frst_verification/`.
+`cytransformer/validation/` checks **fine** + **star** (trivial), **valid** tiling (`check_valid`, via
+`pycddlib`), and **regular** (`regularity.is_regular`, a small LP: does a height function exist whose
+lower hull is this triangulation). These combine in `is_frst`, cross‑checked against CYTools on a
+labeled set with full agreement; the cross‑check harness lives in `dev/frst_verification/`.
 
 ## Repository layout
 
 ```
-cytransformer/        # the self-contained core (no CYTools)
+cytransformer/        # the model + training/inference + FRST verifier
   models  args  dataset  utilities  inference  train  config  data_prep
   cli/         prepare_data  train  infer
-  validation/  frst  regularity  check_valid       # CYTools-free FRST verifier
-generation/           # OPTIONAL extras (need CYTools): make_dataset, fetch_polytopes
+  validation/  frst  regularity  check_valid
+datasets/             # ready-to-train data: 9+1 (h11=5), 10+1 (h11=6)
+generation/           # optional tools that make polytope data (need CYTools)
 configs/  examples/  tests/  dev/
 ```
 
