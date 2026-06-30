@@ -1,10 +1,10 @@
 # CYTransformer
 
 A transformer that generates **Fine, Regular, Star Triangulations (FRSTs)** of 4‑dimensional
-reflexive polytopes — the combinatorial data behind smooth Calabi‑Yau threefolds — and verifies
+reflexive polytopes — the combinatorial data behind smooth Calabi-Yau threefolds — and verifies
 each generated triangulation is a genuine FRST in real time.
 
-Reference implementation for *"Transforming Calabi‑Yau Constructions: Generating New Calabi‑Yau
+Reference implementation for *"Transforming Calabi-Yau Constructions: Generating New Calabi-Yau
 Manifolds with Transformers"* ([arXiv:2507.03732](https://arxiv.org/abs/2507.03732)), and the first
 software component of **AICY** (https://aicy.physics.wisc.edu).
 
@@ -18,9 +18,6 @@ cd cytransformer
 pip install -e .
 ```
 This gives you three commands: `cyt-prepare`, `cyt-train`, `cyt-infer`.
-
-> CYTools is **not** required to train or to generate/validate FRSTs. It is only needed for the
-> optional tools that *make* polytope data — see [CYTools extras](#cytools-extras-optional).
 
 ## Generate FRSTs (with a trained model)
 
@@ -40,7 +37,8 @@ is read from the checkpoint, so you never specify it. (Add `--no-validate` to sk
 
 ## Train your own model
 
-The repo ships ready‑to‑train datasets, already split into train/val/test:
+The repo ships ready‑to‑train datasets of **favorable** reflexive polytopes, already split into
+train/val/test:
 - **`datasets/9+1/`** — h11 = 5
 - **`datasets/10+1/`** — h11 = 6
 
@@ -72,7 +70,7 @@ cyt-prepare --polys my_polys.json --triangs my_triangs.json --n-vertices 9 \
             --n-train 8000 --n-val 1000 --n-test 1000 --out data/
 ```
 
-## CYTools extras (optional)
+## Data generation (optional)
 
 The scripts in `generation/` produce polytope data, and require a **CYTools** install
 (https://cytools.liammcallister.com):
@@ -97,10 +95,12 @@ Plain JSON:
 
 ## FRST verification
 
-`cytransformer/validation/` checks **fine** + **star** (trivial), **valid** tiling (`check_valid`, via
-`pycddlib`), and **regular** (`regularity.is_regular`, a small LP: does a height function exist whose
-lower hull is this triangulation). These combine in `is_frst`, cross‑checked against CYTools on a
-labeled set with full agreement; the cross‑check harness lives in `dev/frst_verification/`.
+`cytransformer/validation/` verifies a triangulation is a genuine FRST by checking it is **valid** (a
+true triangulation of the polytope, via `check_valid`/`pycddlib`) and satisfies the **Fine**,
+**Regular**, and **Star** conditions — Regular being the substantive test (`regularity.is_regular`, a
+linear program asking whether a height function exists whose lower hull is exactly this triangulation).
+These combine in `is_frst`, whose verdicts match CYTools on a labeled set with full agreement (harness
+in `dev/frst_verification/`).
 
 ## Repository layout
 
@@ -113,12 +113,6 @@ datasets/             # ready-to-train data: 9+1 (h11=5), 10+1 (h11=6)
 generation/           # optional tools that make polytope data (need CYTools)
 configs/  examples/  tests/  dev/
 ```
-
-## The frozen model contract
-
-To keep checkpoints loadable across versions, do **not** edit `cytransformer/models.py`, the checkpoint
-schema in `train.py`, or the encoding (`args.encoding_parameters`, `dataset.py`, `utilities.py`
-translation helpers). `tests/test_checkpoint_contract.py` guards this.
 
 ## Citation
 
