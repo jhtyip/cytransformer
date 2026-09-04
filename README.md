@@ -46,16 +46,16 @@ validation history, so training can be resumed or inspected.
 The full datasets behind the paper — favorable reflexive polytopes paired with reference FRSTs,
 pre-split into train/val/test.
 
-| Config | h11 | Train polytopes | Train pairs | Val | Test | Size |
-|---|---|---|---|---|---|---|
-| `9+1`  | 5  | 3,897  | 45,416    | 500   | 500   | 20 MB |
-| `10+1` | 6  | 14,608 | 513,973   | 1,000 | 1,000 | 242 MB |
-| `11+1` | 7  | 42,221 | 5,266,151 | 3,000 | 3,000 | 2.88 GB |
-| `12+1` | 8  | 7,425  | 3,751,111 | 1,000 | 1,000 | 2.60 GB |
-| `13+1` | 9  | 16,727 | 4,386,161 | 1,000 | 1,000 | 3.03 GB |
-| `14+1` | 10 | 16,486 | 4,815,210 | 1,000 | 1,000 | 3.72 GB |
+| Config | h11 | Train | Val | Test | Size |
+|---|---|---|---|---|---|
+| `9+1`  | 5  | 3,897 / 45,416     | 500 / 5,763     | 500 / 5,535     | 20 MB |
+| `10+1` | 6  | 14,608 / 513,973   | 1,000 / 36,213  | 1,000 / 34,095  | 242 MB |
+| `11+1` | 7  | 42,221 / 5,266,151 | 3,000 / 347,784 | 3,000 / 376,398 | 2.88 GB |
+| `12+1` | 8  | 7,425 / 3,751,111  | 1,000 / 503,231 | 1,000 / 488,398 | 2.60 GB |
+| `13+1` | 9  | 16,727 / 4,386,161 | 1,000 / 260,805 | 1,000 / 258,880 | 3.03 GB |
+| `14+1` | 10 | 16,486 / 4,815,210 | 1,000 / 291,089 | 1,000 / 291,313 | 3.72 GB |
 
-Val/test columns count polytopes; a *pair* is one polytope with one of its triangulations. Splits are
+Columns read *polytopes / pairs*; a *pair* is one polytope with one of its triangulations. Splits are
 per polytope. Configs `9+1`–`12+1` enumerate triangulations exhaustively; `13+1` and `14+1` use a fast
 sampler capped at 300 per polytope.
 
