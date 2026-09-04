@@ -90,8 +90,8 @@ python generation/make_dataset.py --n_vertices 9 --upper_bound 2000 \
 Plain JSON:
 - **Polytopes:** a list of `[POLYID, DRESVERTS]`, where `DRESVERTS` is `"{{x,y,z,w},{...},...}"` of
   resolved vertices.
-- **Triangulations:** a list of `[POLYID, TRIANG]`, where `TRIANG` is `"{{i,j,k,l,m},...}"` of simplex
-  vertex indices.
+- **Triangulations:** a list of `[POLYID, TRIANG]`, where `TRIANG` is `"{{i,j,k,l},...}"` — the
+  4-simplices of the triangulation, each given as indices into the polytope's vertex list.
 
 ## FRST verification
 
