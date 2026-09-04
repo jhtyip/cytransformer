@@ -24,13 +24,16 @@ This gives you three commands: `cyt-prepare`, `cyt-train`, `cyt-infer`.
 Trained CYTransformer weights, one checkpoint per polytope size. They are **not interchangeable** —
 the vocabulary and sequence length grow with the number of vertices.
 
-| Checkpoint | h11 | Vertices | Step | Vocab | Params | Val loss |
-|---|---|---|---|---|---|---|
-| `chkpt_9+1`  | 5  | 9  | 1,120,108 | 129   | 118.9 M | 2.203 |
-| `chkpt_10+1` | 6  | 10 | 1,019,736 | 213   | 119.0 M | 2.416 |
-| `chkpt_11+1` | 7  | 11 | 861,838   | 333   | 119.1 M | 2.575 |
-| `chkpt_12+1` | 8  | 12 | 1,438,540 | 498   | 119.3 M | 2.829 |
-| `chkpt_14+1` | 10 | 14 | 1,218,169 | 1,004 | 119.8 M | 2.971 |
+| Checkpoint | h11 | Step | Vocab | Params | Val loss |
+|---|---|---|---|---|---|
+| `chkpt_9+1`  | 5  | 1,120,108 | 129   | 118.9 M | 2.203 |
+| `chkpt_10+1` | 6  | 1,019,736 | 213   | 119.0 M | 2.416 |
+| `chkpt_11+1` | 7  | 861,838   | 333   | 119.1 M | 2.575 |
+| `chkpt_12+1` | 8  | 1,438,540 | 498   | 119.3 M | 2.829 |
+| `chkpt_14+1` | 10 | 1,218,169 | 1,004 | 119.8 M | 2.971 |
+
+The name says the polytope size: `9+1` is 9 vertices plus the origin. (The paper's N_vert counts the
+origin, so `chkpt_9+1` is the paper's N_vert = 10.)
 
 ```python
 from huggingface_hub import hf_hub_download
