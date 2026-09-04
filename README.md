@@ -126,7 +126,7 @@ cyt-prepare --polys my_polys.json --triangs my_triangs.json --n-vertices 9 \
 ## Data generation (optional)
 
 The scripts in `generation/` produce polytope data, and require a **CYTools** install
-(https://cytools.liammcallister.com):
+(https://cy.tools):
 
 ```bash
 # Generate FRSTs for any Kreuzer-Skarke polytope: fetch polytopes, then run cyt-infer on them.
